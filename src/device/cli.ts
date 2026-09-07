@@ -1,6 +1,14 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  checkArchitecture,
+  checkVcRuntime,
+  checkZoneIdentifier,
+  printerDrivers,
+  printerQueues,
+  spoolerStatus,
+} from "./windows-checks";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -263,13 +271,24 @@ async function writeDiagnostics(ctx: CliContext, result: CliResult, args: string
       `  stdout     : ${result.stdout.trim() || "(없음)"}`,
       `  stderr     : ${result.stderr.trim() || "(없음)"}`,
       "",
-      "[3] CLI 폴더 내용",
+      "[3] 벤더 자산 점검",
+      // 인터넷에서 받은 파일이 차단돼 있거나 32/64비트가 어긋나면 로드가 조용히 실패한다
+      ...inspectVendorAssets(exeDir),
+      "",
+      "[4] CLI 폴더 내용",
       ...listDir(exeDir),
     ];
 
     // 입력 파일 누락이면 그 파일의 상위 폴더도 함께 본다
     if (result.code === -2001 || result.code === -3103) lines.push(...inspectArg(args, "-I", "입력 이미지"));
     if (result.code === -3102) lines.push(...inspectArg(args, "-X", "입력 XML"));
+
+    lines.push("", "[5] VC++ 재배포 런타임 (System32)", ...checkVcRuntime());
+    // PowerShell 조회는 느리다. 세 갈래를 함께 돌려 보고서 저장이 늦어지지 않게 한다
+    const [spooler, drivers, queues] = await Promise.all([spoolerStatus(), printerDrivers(), printerQueues()]);
+    lines.push("", "[6] 인쇄 스풀러", spooler);
+    lines.push("", "[7] 프린터 드라이버", drivers);
+    lines.push("", "[8] 프린터 큐", queues);
 
     fs.mkdirSync(ctx.diagnosticsDir, { recursive: true });
     fs.writeFileSync(dest, lines.join("\n"), "utf8");
@@ -278,6 +297,32 @@ async function writeDiagnostics(ctx: CliContext, result: CliResult, args: string
     // 보고서를 못 남겨도 본 작업의 실패 처리는 이어져야 한다
   }
 }
+
+/**
+ * 벤더 자산 점검.
+ *
+ * 파일을 이름으로 특정하지 않고 폴더 안 실행 파일·라이브러리를 모두 본다. 목록을
+ * 코드에 적어 두면 이 공개 레포에 벤더 파일명이 남는다.
+ */
+const inspectVendorAssets = (dir: string): string[] => {
+  if (!dir) return ["  (폴더 없음)"];
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir).filter((name) => /\.(exe|dll)$/i.test(name));
+  } catch {
+    return [`  (읽기 실패: ${dir})`];
+  }
+  if (names.length === 0) return ["  (실행 파일·라이브러리 없음)"];
+
+  return names.flatMap((name) => {
+    const target = path.join(dir, name);
+    return [
+      `  -- ${name} --`,
+      `    Windows 차단 : ${checkZoneIdentifier(target)}`,
+      `    아키텍처     : ${checkArchitecture(target)}`,
+    ];
+  });
+};
 
 const listDir = (dir: string): string[] => {
   if (!dir) return ["  (폴더 없음)"];
