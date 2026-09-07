@@ -156,6 +156,34 @@ api.agent.onState((s) => {
   renderAgentState();
 });
 
+// ── 장비 상태 ─────────────────────────────────────────
+const DEVICE_LABEL = {
+  ready: "준비됨",
+  printing: "출력 중",
+  standby: "대기",
+  init: "초기화 중",
+  menu: "메뉴 조작 중",
+  error: "오류",
+  unknown: "알 수 없음",
+};
+
+function renderDevice(status) {
+  const el = $("stat-device");
+  const stat = el.parentElement;
+  if (!status) {
+    // 상태 조회는 LAN 연결 장비에서만 된다. USB 연결이나 꺼진 상태면 여기로 온다
+    el.textContent = "오프라인";
+    stat.classList.remove("danger");
+    return;
+  }
+  const detail = status.errors.length ? ` — ${status.errors[0]}` : status.warnings.length ? ` — ${status.warnings[0]}` : "";
+  el.textContent = (DEVICE_LABEL[status.state] ?? status.state) + detail;
+  stat.classList.toggle("danger", status.state === "error");
+}
+
+api.device.onStatus(renderDevice);
+api.device.status().then(renderDevice);
+
 // ── 확인 모달 ─────────────────────────────────────────
 let confirmResolve = null;
 
