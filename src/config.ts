@@ -59,6 +59,14 @@ export type AppConfig = {
   /** PDF 를 래스터화할 해상도 */
   renderDpi: number;
 
+  /**
+   * 장비로 보낸 인쇄 데이터를 되풀어 진단 폴더에 남길지.
+   *
+   * 출력물이 어긋났을 때 무엇을 보냈는지 확인하는 유일한 경로지만, 건마다 원본·XML·
+   * 이미지 세 개가 쌓인다. 기본은 꺼짐이고 문제를 쫓을 때만 켠다.
+   */
+  extractDiagnostic: boolean;
+
   /** 장비 인쇄 설정 */
   print: PrintSettings;
 };
@@ -79,6 +87,7 @@ const defaults = (): AppConfig => ({
   cliLegacyPath: "",
   cliProPath: "",
   renderDpi: 300,
+  extractDiagnostic: false,
   print: { ...DEFAULT_PRINT_SETTINGS },
 });
 
