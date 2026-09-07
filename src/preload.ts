@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld("garment", {
   device: {
     /** 장비로 전송. ink 는 옷 색(0=흰옷, 2=컬러옷) */
     send: (jobId: string, ink?: number) => ipcRenderer.invoke("device:send", jobId, ink),
+    /** 장비 상태 (LAN 연결일 때만. 아니면 null = 오프라인) */
+    status: () => ipcRenderer.invoke("device:status"),
+    onStatus: (cb: (payload: unknown) => void) => on("device:status", cb),
   },
 
   queue: {
