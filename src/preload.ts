@@ -6,8 +6,43 @@ import { contextBridge, ipcRenderer } from "electron";
  * `contextIsolation` 을 켠 상태에서 필요한 것만 건넨다. 렌더러가 Node 에 직접 닿지 않게
  * 하려는 것이므로, 여기서 창구를 넓히지 않는다.
  */
+/** 구독 헬퍼 — 해제 함수를 돌려준다 */
+const on = (channel: string, cb: (payload: unknown) => void) => {
+  const handler = (_e: unknown, payload: unknown) => cb(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.off(channel, handler);
+};
+
 contextBridge.exposeInMainWorld("garment", {
   getVersion: (): Promise<string> => ipcRenderer.invoke("app:version"),
+
+  config: {
+    get: () => ipcRenderer.invoke("config:get"),
+    set: (patch: unknown) => ipcRenderer.invoke("config:set", patch),
+    path: () => ipcRenderer.invoke("config:path"),
+  },
+
+  auth: {
+    /** 스토어 식별자로 인증 시작. 브라우저가 열리고 승인되면 auth:result 가 온다 */
+    start: (tenant: string) => ipcRenderer.invoke("auth:start", tenant),
+    cancel: () => ipcRenderer.invoke("auth:cancel"),
+    onResult: (cb: (payload: unknown) => void) => on("auth:result", cb),
+  },
+
+  agent: {
+    start: () => ipcRenderer.invoke("agent:start"),
+    stop: () => ipcRenderer.invoke("agent:stop"),
+    state: () => ipcRenderer.invoke("agent:state"),
+    onState: (cb: (payload: unknown) => void) => on("agent:state", cb),
+    onReady: (cb: (payload: unknown) => void) => on("queue:ready", cb),
+    onRemoved: (cb: (payload: unknown) => void) => on("queue:removed", cb),
+  },
+
+  printers: {
+    list: () => ipcRenderer.invoke("printers:list"),
+  },
+
+  onLog: (cb: (payload: unknown) => void) => on("log", cb),
 
   update: {
     /** 지금 상태 조회 (창을 새로 그렸을 때 복원용) */

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "node:path";
+import { setupIpc, teardownIpc } from "./ipc";
 import { check, setupUpdater } from "./updater";
 
 /**
@@ -57,6 +58,7 @@ if (!gotLock) {
 
     createWindow();
     if (mainWindow) {
+      setupIpc(mainWindow);
       setupUpdater(mainWindow, app.getVersion());
       // 앱 시작 시 한 번 확인. 이후로는 수동 버튼으로만 확인한다
       void check();
@@ -70,4 +72,7 @@ if (!gotLock) {
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
   });
+
+  // 폴링이 남으면 다음 실행에서 같은 큐를 이중으로 가져간다
+  app.on("before-quit", () => teardownIpc());
 }
