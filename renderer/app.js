@@ -46,6 +46,7 @@ async function loadConfig() {
   $("p-auto-fit").checked = p.autoFit;
   $("p-auto-center").checked = p.autoCenter;
   $("p-auto-delete").checked = p.autoDelete;
+  $("extract-diagnostic").checked = config.extractDiagnostic;
 
   await loadPrinters();
 }
@@ -92,6 +93,7 @@ $("p-magnification").addEventListener("change", (e) => savePrint({ magnification
 $("p-auto-fit").addEventListener("change", (e) => savePrint({ autoFit: e.target.checked }));
 $("p-auto-center").addEventListener("change", (e) => savePrint({ autoCenter: e.target.checked }));
 $("p-auto-delete").addEventListener("change", (e) => savePrint({ autoDelete: e.target.checked }));
+$("extract-diagnostic").addEventListener("change", (e) => save({ extractDiagnostic: e.target.checked }));
 
 for (const btn of document.querySelectorAll("[data-open]")) {
   btn.addEventListener("click", () => api.openFolder(btn.dataset.open));

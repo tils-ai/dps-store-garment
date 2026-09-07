@@ -422,6 +422,7 @@ export class Agent {
           cliStatePath: cliStatePath(),
           cliPaths: resolveCliPaths(config),
           renderDpi: config.renderDpi,
+          extractDiagnostic: config.extractDiagnostic,
           onLog: (level, message) => this.log(level, `${label} — ${message}`),
         });
         if (!result.ok) throw new Error(result.reason);
