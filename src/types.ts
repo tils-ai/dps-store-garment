@@ -62,6 +62,13 @@ export type ReadyItem = {
   status: "ready" | "printing" | "failed" | "done";
   errorReason: string;
   /**
+   * 감시 폴더에서 집어 온 건인지.
+   *
+   * 서버 큐에 없는 건이므로 다운로드·완료·실패 보고를 올리면 404 가 난다. 상태 보고를
+   * 건너뛰어야 하는 자리를 이 값으로 가른다.
+   */
+  local?: boolean;
+  /**
    * 카드에 보여줄 미리보기 (data URL).
    *
    * 화면은 로컬 파일 경로를 그대로 못 읽으므로 메인 프로세스가 만들어 내려준다.

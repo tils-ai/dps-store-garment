@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { GarmentApi } from "./api";
@@ -272,6 +273,80 @@ export class Agent {
   }
 
   /**
+   * 감시 폴더에서 집은 파일을 대기 목록에 넣는다.
+   *
+   * 서버 큐에 없는 건이라 상태 보고를 올리지 않는다. 작업지시서에 쓸 주문 정보도 없으므로
+   * 장비 전송만 맡는다. 원본은 다시 집히지 않도록 done/error 로 옮긴다.
+   */
+  async addLocalFile(filePath: string): Promise<{ ok: boolean; reason?: string }> {
+    const config = getConfig();
+    const name = path.basename(filePath);
+
+    try {
+      if (!config.garmentEnabled) throw new Error("이 단말은 장비 전송을 맡지 않습니다.");
+
+      fs.mkdirSync(config.downloadDir, { recursive: true });
+      // 원본을 그대로 쓰면 감시 폴더를 비울 수 없다. 사본을 두고 원본은 옮긴다
+      const downloadPath = uniquePath(path.join(config.downloadDir, name));
+      fs.copyFileSync(filePath, downloadPath);
+
+      const job: GarmentJob = {
+        id: `local:${crypto.randomUUID()}`,
+        orderNumber: path.parse(name).name,
+        productName: "감시 폴더",
+        optionName: null,
+        wepnpSeqno: "",
+        quantity: 1,
+        needsPlateChange: false,
+        itemIndex: 1,
+        itemTotal: 1,
+        designFileUrl: "",
+        designFileType: path.extname(name).replace(".", "").toUpperCase(),
+        garmentPending: true,
+        workOrderPending: false,
+        workOrder: { tenantName: "", brandName: "", printedBy: "", workUrl: "", thumbnailUrls: [] },
+        createdAt: new Date().toISOString(),
+      };
+
+      const item: ReadyItem = {
+        job,
+        downloadPath,
+        thumbnailPaths: [],
+        doGarment: true,
+        doWorkOrder: false,
+        status: "ready",
+        errorReason: "",
+        local: true,
+      };
+      item.thumbUrl = await makeThumbnail(downloadPath).catch(() => null);
+
+      this.ready.set(job.id, item);
+      this.persist();
+      this.events.onReady?.(item);
+      this.archive(filePath, "done");
+
+      if (config.autoSend) void this.sendToPrinter(job.id);
+      return { ok: true };
+    } catch (error) {
+      const reason = (error as Error).message;
+      this.log("error", `감시 폴더 파일을 담지 못했습니다: ${name} — ${reason}`);
+      this.archive(filePath, "error");
+      return { ok: false, reason };
+    }
+  }
+
+  /** 집은 원본을 감시 폴더 하위로 치운다. 남겨두면 다음 훑기에서 또 집는다 */
+  private archive(filePath: string, kind: "done" | "error"): void {
+    try {
+      const dest = uniquePath(path.join(path.dirname(filePath), kind, path.basename(filePath)));
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.renameSync(filePath, dest);
+    } catch (error) {
+      this.log("warn", `원본 파일을 옮기지 못했습니다: ${(error as Error).message}`);
+    }
+  }
+
+  /**
    * 작업지시서를 인쇄한다. 작업자가 전송을 누를 때 호출한다.
    *
    * 지시서를 먼저, 디자인을 나중에 보낸다. 순서를 바꾸면 옷이 먼저 나오고 그 옷이
@@ -352,7 +427,7 @@ export class Agent {
         if (!result.ok) throw new Error(result.reason);
 
         item.doGarment = false;
-        await api.markPrinted(jobId, "garment").catch(() => undefined);
+        if (!item.local) await api.markPrinted(jobId, "garment").catch(() => undefined);
         this.log("info", `장비 전송 완료: ${label}`);
       }
 
@@ -368,7 +443,7 @@ export class Agent {
       item.errorReason = reason;
       this.events.onItemChanged?.(item);
       // 서버가 READY 로 두므로 작업자가 다시 누를 수 있다
-      if (item.doGarment) await api.markFailed(jobId, "garment", reason).catch(() => undefined);
+      if (item.doGarment && !item.local) await api.markFailed(jobId, "garment", reason).catch(() => undefined);
       this.log("error", `장비 전송 실패: ${label} — ${reason}`);
       return { ok: false, reason };
     } finally {
@@ -392,7 +467,8 @@ export class Agent {
     const label = `${item.job.orderNumber} ${item.job.wepnpSeqno}`;
 
     try {
-      await api.deleteJob(jobId);
+      // 감시 폴더에서 집은 건은 서버 큐에 없다. 로컬만 정리한다
+      if (!item.local) await api.deleteJob(jobId);
     } catch (error) {
       const status = (error as { status?: number }).status;
       if (status !== 404) {
@@ -488,6 +564,17 @@ function resolveCliPaths(config: { cliLegacyPath: string; cliProPath: string }):
     legacy: config.cliLegacyPath || path.join(dir, "cli_legacy.exe"),
     pro: config.cliProPath || path.join(dir, "cli_pro.exe"),
   };
+}
+
+/** 같은 이름이 있으면 뒤에 번호를 붙인다. 덮어쓰면 아직 출력하지 않은 건이 사라진다 */
+function uniquePath(target: string): string {
+  if (!fs.existsSync(target)) return target;
+  const dir = path.dirname(target);
+  const { name, ext } = path.parse(target);
+  for (let n = 1; ; n++) {
+    const candidate = path.join(dir, `${name}_${n}${ext}`);
+    if (!fs.existsSync(candidate)) return candidate;
+  }
 }
 
 /** 파일명에 쓸 수 없는 문자를 걷어낸다 */
