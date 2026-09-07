@@ -4,6 +4,7 @@ import path from "node:path";
 import { buildPrintXml } from "./build-xml";
 import { dataExtension, preferredModel, runOnActive, runWithProbe, setCliStatePath, type CliContext } from "./cli";
 import { centerPosition, convertDesign, dimsInMm10, fitPosition, parseSize } from "./convert";
+import { extractPrintData } from "./extract";
 import type { PrintSettings } from "./print-settings";
 
 /**
@@ -36,6 +37,8 @@ export type SendOptions = {
   cliPaths: { legacy: string; pro: string };
   /** PDF 를 래스터화할 해상도 */
   renderDpi: number;
+  /** 보낸 인쇄 데이터를 되풀어 진단 폴더에 남길지 */
+  extractDiagnostic?: boolean;
   onLog?: (level: "info" | "warn" | "error", message: string) => void;
 };
 
@@ -107,6 +110,12 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
       const created = await runWithProbe(ctx, args);
       if (created.code !== 0) {
         return { ok: false, reason: `인쇄 데이터 생성 실패${label ? ` (${label})` : ""}: ${created.description}`, code: created.code };
+      }
+
+      // 무엇을 보냈는지 되풀어 남긴다. 문제를 쫓을 때만 켠다
+      if (opts.extractDiagnostic) {
+        const extracted = await extractPrintData(ctx, dataPath, opts.diagnosticsDir, i + 1);
+        log(extracted.ok ? "info" : "warn", extracted.ok ? "인쇄 데이터 진단 저장" : extracted.reason!);
       }
 
       // 수량만큼 반복 전송한다. 장비가 매수를 스스로 늘리지 않는다
