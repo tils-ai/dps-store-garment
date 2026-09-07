@@ -1,7 +1,10 @@
 import { BrowserWindow, ipcMain, shell } from "electron";
+import fs from "node:fs";
+import path from "node:path";
 import { Agent } from "./agent";
+import { disposeConverter } from "./device";
 import { pollAuth, requestAuth } from "./api";
-import { configPath, getConfig, setConfig } from "./config";
+import { configPath, diagnosticsDir, getConfig, setConfig } from "./config";
 import type { AppConfig } from "./config";
 
 /**
@@ -28,6 +31,10 @@ export function setupIpc(mainWindow: BrowserWindow): void {
     onLog: (level, message) => send("log", { level, message, at: Date.now() }),
     onStateChange: (running) => send("agent:state", { running }),
   });
+
+  // 앱이 꺼졌다 켜져도 이미 받아 둔 건이 남아 있어야 한다.
+  // 서버는 그 건들을 READY 로 보고 다시 내려주지 않는다
+  agent.restore();
 
   // ── 설정 ──
   ipcMain.handle("config:get", () => getConfig());
@@ -110,6 +117,26 @@ export function setupIpc(mainWindow: BrowserWindow): void {
     return agent.previewWorkOrder(jobId);
   });
 
+  // ── 장비 전송 ──
+  ipcMain.handle("device:send", async (_e, jobId: string, ink?: number) => {
+    if (!agent) return { ok: false, reason: "준비되지 않았습니다." };
+    return agent.sendToPrinter(jobId, ink);
+  });
+
+  ipcMain.handle("queue:delete", async (_e, jobId: string) => {
+    if (!agent) return { ok: false, reason: "준비되지 않았습니다." };
+    return agent.deleteItem(jobId);
+  });
+
+  // ── 폴더 열기 ── 문제 확인 때 현장에서 직접 들여다본다
+  ipcMain.handle("open:folder", (_e, kind: "download" | "logs" | "config") => {
+    const target =
+      kind === "download" ? getConfig().downloadDir : kind === "logs" ? diagnosticsDir() : path.dirname(configPath());
+    fs.mkdirSync(target, { recursive: true });
+    void shell.openPath(target);
+    return target;
+  });
+
   // ── 프린터 목록 ──
   ipcMain.handle("printers:list", async () => {
     const printers = await mainWindow.webContents.getPrintersAsync();
@@ -117,9 +144,10 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   });
 }
 
-/** 창이 닫힐 때 폴링을 멈춘다. 남겨두면 다음 실행에서 큐를 이중으로 가져간다 */
+/** 창이 닫힐 때 폴링과 변환기를 멈춘다. 남겨두면 프로세스가 안 죽는다 */
 export function teardownIpc(): void {
   agent?.stop();
   agent = null;
   window = null;
+  disposeConverter();
 }

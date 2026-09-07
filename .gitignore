@@ -11,3 +11,6 @@ vendor/.dll_manifest
 
 # 빌드 시 가명 자산을 원본 이름으로 복원하는 임시 폴더
 .source/
+
+# 빌드 시 가명 자산을 실제 이름으로 복원하는 임시 폴더
+.vendor-build/

@@ -2,7 +2,7 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: file:; style-src 'self' 'unsafe-inline'" />
     <title>가먼트 프린터</title>
     <link rel="stylesheet" href="style.css" />
   </head>
@@ -11,15 +11,26 @@
       <h1>가먼트 프린터</h1>
       <div class="head-right">
         <span id="conn" class="chip">확인 중</span>
+        <button class="secondary small" id="agent-toggle">시작</button>
+        <button class="secondary small" id="nav-settings">설정</button>
         <span class="version" id="version"></span>
       </div>
     </header>
 
+    <!-- 현황 -->
+    <div class="stats" id="stats">
+      <div class="stat"><span class="label">대기</span><b id="stat-ready">0</b></div>
+      <div class="stat"><span class="label">전송 중</span><b id="stat-printing">0</b></div>
+      <div class="stat"><span class="label">완료</span><b id="stat-done">0</b></div>
+      <div class="stat danger"><span class="label">실패</span><b id="stat-failed">0</b></div>
+      <div class="stat grow"><span class="label">상태</span><b id="stat-agent">멈춤</b></div>
+    </div>
+
     <main>
-      <!-- 인증 전 -->
+      <!-- 연결 전 -->
       <section class="card" id="auth-card" hidden>
         <h2>스토어 연결</h2>
-        <p>이 단말을 어느 스토어에 연결할지 정합니다. 확인 버튼을 누르면 브라우저가 열리고, 관리자 승인 후 연결됩니다.</p>
+        <p>이 단말을 어느 스토어에 연결할지 정합니다. 연결 버튼을 누르면 브라우저가 열리고, 관리자 승인 후 연결됩니다.</p>
         <div class="row">
           <input id="tenant" type="text" placeholder="스토어 주소 (예: spao-seongsu)" autocomplete="off" />
           <button class="primary" id="auth-start">연결하기</button>
@@ -27,50 +38,103 @@
         <div id="auth-status" class="status"></div>
       </section>
 
-      <!-- 인증 후 -->
-      <section class="card" id="run-card" hidden>
-        <h2>출력 대기</h2>
-        <p id="run-desc">서버에서 출력할 건을 가져옵니다.</p>
-        <div class="row">
-          <button class="primary" id="agent-toggle">시작</button>
-          <span id="agent-state" class="status"></span>
+      <!-- 출력 대기 -->
+      <section id="queue-view" hidden>
+        <div class="tabs" id="tabs">
+          <button class="tab on" data-filter="ready">대기</button>
+          <button class="tab" data-filter="failed">실패</button>
+          <button class="tab" data-filter="done">완료</button>
         </div>
-        <div id="queue" class="queue"></div>
+        <div id="queue" class="grid"></div>
       </section>
 
-      <section class="card">
-        <h2>설정</h2>
-        <div class="settings">
-          <label class="check"><input type="checkbox" id="garment-enabled" /> 디자인을 장비로 보낸다</label>
-          <label class="check"><input type="checkbox" id="work-order-enabled" /> 작업지시서를 인쇄한다</label>
-          <label class="field">
-            <span>작업지시서 프린터</span>
-            <select id="work-order-printer"></select>
-          </label>
+      <!-- 설정 -->
+      <section id="settings-view" hidden>
+        <div class="card">
+          <h2>이 단말이 맡을 작업</h2>
+          <div class="settings">
+            <label class="check"><input type="checkbox" id="garment-enabled" /> 디자인을 장비로 보낸다</label>
+            <label class="check"><input type="checkbox" id="work-order-enabled" /> 작업지시서를 인쇄한다</label>
+            <label class="check">
+              <input type="checkbox" id="auto-send" />
+              받는 즉시 자동 전송 (작업자 확인 없이)
+            </label>
+          </div>
+          <p class="hint">
+            자동 전송을 켜면 옷 색을 고를 수 없어 기본 잉크 설정으로 나갑니다. 잘못 들어온 건도 그대로 출력됩니다.
+          </p>
         </div>
-        <div class="row">
-          <button class="secondary" id="reauth">다른 스토어로 연결</button>
+
+        <div class="card">
+          <h2>프린터</h2>
+          <div class="settings">
+            <label class="field"><span>장비</span><select id="garment-printer"></select></label>
+            <label class="field"><span>작업지시서</span><select id="work-order-printer"></select></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>장비 설정</h2>
+          <div class="settings two">
+            <label class="field"><span>CLI 계열</span>
+              <select id="p-cli"><option value="auto">자동</option><option value="legacy">legacy</option><option value="pro">pro</option></select>
+            </label>
+            <label class="field"><span>잉크</span>
+              <select id="p-ink"><option value="0">흰옷 (컬러만)</option><option value="1">흰색만</option><option value="2">컬러옷 (흰색+컬러)</option></select>
+            </label>
+            <label class="field"><span>해상도</span><input type="number" id="p-resolution" min="0" max="3" /></label>
+            <label class="field"><span>성인 플레이트</span><input type="number" id="p-platen-adult" min="0" max="4" /></label>
+            <label class="field"><span>아동 플레이트</span><input type="number" id="p-platen-child" min="0" max="4" /></label>
+            <label class="field"><span>배율</span><input type="text" id="p-magnification" placeholder="1000 = 100%" /></label>
+            <label class="field"><span>렌더 DPI</span><input type="number" id="p-render-dpi" min="72" max="1200" /></label>
+            <label class="check"><input type="checkbox" id="p-auto-fit" /> 플레이트 맞춤</label>
+            <label class="check"><input type="checkbox" id="p-auto-center" /> 가운데 정렬</label>
+            <label class="check"><input type="checkbox" id="p-auto-delete" /> 전송 후 장비에서 작업 삭제</label>
+          </div>
+          <p class="hint">전송 후 작업 삭제는 pro 계열에서만 동작합니다. legacy 는 장비 패널 설정을 따릅니다.</p>
+        </div>
+
+        <div class="card">
+          <h2>폴더</h2>
+          <div class="row">
+            <button class="secondary" data-open="download">다운로드 폴더</button>
+            <button class="secondary" data-open="logs">진단 보고서</button>
+            <button class="secondary" data-open="config">설정 파일</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>업데이트</h2>
+          <p>앱을 켤 때 새 버전을 한 번 확인합니다. 출력 도중 재시작을 피하려고 주기적으로 확인하지는 않습니다.</p>
+          <div class="row">
+            <button class="secondary" id="check">업데이트 확인</button>
+            <button class="primary" id="install" hidden>재시작하고 적용</button>
+          </div>
+          <div id="update-status" class="status"></div>
+          <div class="row">
+            <button class="secondary" id="reauth">다른 스토어로 연결</button>
+          </div>
         </div>
       </section>
 
-      <section class="card">
-        <h2>업데이트</h2>
-        <p>
-          앱을 켤 때 새 버전을 한 번 확인합니다. 출력 도중 재시작을 피하려고 주기적으로 확인하지는 않으니, 필요하면 아래
-          버튼으로 직접 확인하세요.
-        </p>
-        <div class="row">
-          <button class="secondary" id="check">업데이트 확인</button>
-          <button class="primary" id="install" hidden>재시작하고 적용</button>
-        </div>
-        <div id="update-status" class="status"></div>
-      </section>
-
+      <!-- 로그 -->
       <section class="card">
         <h2>로그</h2>
         <div id="log" class="log"></div>
       </section>
     </main>
+
+    <!-- 확인 모달 -->
+    <div class="backdrop" id="confirm" hidden>
+      <div class="modal">
+        <h3 id="confirm-title"></h3>
+        <p id="confirm-message"></p>
+        <div class="row end">
+          <button class="secondary" id="confirm-cancel">취소</button>
+          <button class="danger" id="confirm-ok">삭제</button>
+        </div>
+      </div>
+    </div>
 
     <script src="app.js"></script>
   </body>

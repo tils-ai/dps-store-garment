@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { GarmentApi } from "./api";
-import { getConfig } from "./config";
+import { cliStatePath, diagnosticsDir, getConfig, vendorDir, workDir } from "./config";
+import { sendToDevice } from "./device";
 import { printHtml, saveHtmlAsPdf } from "./printer";
 import type { GarmentJob, ReadyItem } from "./types";
 import { buildWorkOrderHtml } from "./work-order";
-import { fileToDataUrl, makeQrDataUrl } from "./work-order-assets";
+import { fileToDataUrl, makeQrDataUrl, makeThumbnail } from "./work-order-assets";
 
 /**
  * 폴링 에이전트.
@@ -16,6 +17,13 @@ import { fileToDataUrl, makeQrDataUrl } from "./work-order-assets";
 
 /** 큐가 비었을 때 폴링을 늦추는 상한(초). 서버와 네트워크를 아낀다 */
 const MAX_BACKOFF_SEC = 30;
+
+/**
+ * 완료 이력을 몇 건까지 남길지.
+ *
+ * 다 지우면 방금 무엇을 보냈는지 확인할 수 없고, 무한정 쌓으면 화면이 무거워진다.
+ */
+const DONE_KEEP = 30;
 
 export type AgentEvents = {
   onReady?: (item: ReadyItem) => void;
@@ -31,6 +39,8 @@ export class Agent {
   private emptyCount = 0;
   /** 이미 받아 둔 건을 다시 받지 않기 위한 표식 */
   private readonly ready = new Map<string, ReadyItem>();
+  /** 전송 중인 건 — 같은 건을 두 번 보내지 않게 막는다 */
+  private readonly sending = new Set<string>();
 
   constructor(private readonly events: AgentEvents = {}) {}
 
@@ -60,6 +70,75 @@ export class Agent {
     }
     this.events.onStateChange?.(false);
     this.log("info", "폴링을 멈췄습니다.");
+  }
+
+  /**
+   * 대기 목록을 파일에 남긴다.
+   *
+   * 앱이 꺼지거나 죽어도 이미 받아 둔 건이 사라지면 안 된다. 서버는 그 건들을 READY 로
+   * 보고 다시 내려주지 않으므로, 로컬 기록을 잃으면 영영 출력되지 않는다.
+   */
+  private persist(): void {
+    try {
+      const dest = this.storePath();
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      const tmp = `${dest}.tmp`;
+      const plain = [...this.ready.values()].map(({ thumbUrl: _thumb, ...rest }) => rest);
+      fs.writeFileSync(tmp, JSON.stringify(plain, null, 2), "utf8");
+      fs.renameSync(tmp, dest);
+    } catch (error) {
+      this.log("warn", `대기 목록 저장 실패: ${(error as Error).message}`);
+    }
+  }
+
+  /** 저장해 둔 대기 목록을 되살린다. 파일이 실제로 남아 있는 것만 */
+  restore(): ReadyItem[] {
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.storePath(), "utf8")) as ReadyItem[];
+      for (const item of saved) {
+        // 파일이 지워졌으면 되살려도 출력할 수 없다
+        if (!item?.job?.id || !fs.existsSync(item.downloadPath)) continue;
+        item.thumbnailPaths = (item.thumbnailPaths ?? []).filter((p) => fs.existsSync(p));
+        // 전송 중에 앱이 꺼졌으면 다시 누를 수 있게 대기로 되돌린다
+        if (item.status === "printing") item.status = "ready";
+        // 썸네일은 저장하지 않는다. data URL 을 파일에 담으면 목록 파일이 수십 MB 가 된다
+        item.thumbUrl = null;
+        this.ready.set(item.job.id, item);
+        void makeThumbnail(item.downloadPath)
+          .then((url) => {
+            item.thumbUrl = url;
+            this.events.onItemChanged?.(item);
+          })
+          .catch(() => undefined);
+      }
+      if (this.ready.size > 0) this.log("info", `대기 목록 ${this.ready.size}건을 되살렸습니다.`);
+    } catch {
+      // 파일이 없거나 깨졌다. 빈 목록으로 시작한다
+    }
+    return this.snapshot();
+  }
+
+  /** 완료 이력이 상한을 넘으면 오래된 것부터 걷어낸다 */
+  private evictOldDone(): void {
+    const done = [...this.ready.values()].filter((it) => it.status === "done");
+    if (done.length <= DONE_KEEP) return;
+    for (const item of done.slice(0, done.length - DONE_KEEP)) {
+      this.ready.delete(item.job.id);
+      // 이력에서 빠지는 건의 파일도 함께 지운다. 고객 도안을 단말에 쌓아두지 않는다
+      for (const file of [item.downloadPath, ...item.thumbnailPaths]) {
+        try {
+          fs.rmSync(file, { force: true });
+        } catch {
+          // 지우지 못해도 목록에서는 빠졌다
+        }
+      }
+      this.events.onRemoved?.(item.job.id);
+    }
+    this.persist();
+  }
+
+  private storePath(): string {
+    return path.join(getConfig().downloadDir, "ready.json");
   }
 
   private log(level: "info" | "warn" | "error", message: string): void {
@@ -165,7 +244,11 @@ export class Agent {
         status: "ready",
         errorReason: "",
       };
+      // 카드 미리보기 — 원본은 300DPI 라 작은 판으로 줄여 담는다
+      item.thumbUrl = await makeThumbnail(downloadPath).catch(() => null);
+
       this.ready.set(job.id, item);
+      this.persist();
 
       // 서버에 다운로드 완료를 알려 다른 단말이 같은 건을 가져가지 않게 한다
       if (doGarment) await this.report(api, job.id, "garment");
@@ -173,6 +256,12 @@ export class Agent {
 
       this.log("info", `대기 목록에 담았습니다: ${label}`);
       this.events.onReady?.(item);
+
+      // 자동 전송이 켜져 있으면 곧장 보낸다. 기본은 꺼짐이다 —
+      // 옷 색(잉크 모드)을 작업자가 골라야 하고, 잘못 들어온 건도 그대로 나가기 때문이다
+      if (config.autoSend) {
+        void this.sendToPrinter(job.id);
+      }
     } catch (error) {
       const reason = (error as Error).message;
       this.log("error", `다운로드 실패: ${label} — ${reason}`);
@@ -202,6 +291,7 @@ export class Agent {
       if (!result.ok) throw new Error(result.reason);
 
       item.doWorkOrder = false;
+      this.persist();
       this.events.onItemChanged?.(item);
       await api.markPrinted(jobId, "workOrder").catch(() => undefined);
       this.log("info", `작업지시서 출력 완료: ${label}`);
@@ -215,6 +305,116 @@ export class Agent {
       this.log("error", `작업지시서 출력 실패: ${label} — ${reason}`);
       return { ok: false, reason };
     }
+  }
+
+  /**
+   * 장비로 전송한다. 작업자가 옷 색을 골라 누를 때 호출한다.
+   *
+   * 지시서를 먼저, 장비를 나중에 보낸다. 순서를 바꾸면 옷이 먼저 나오고 그 옷이 어느
+   * 주문인지 적힌 종이가 늦게 나와 현장에서 짝이 어긋난다.
+   */
+  async sendToPrinter(jobId: string, ink?: number): Promise<{ ok: boolean; reason?: string }> {
+    const item = this.ready.get(jobId);
+    if (!item) return { ok: false, reason: "이미 없는 항목입니다." };
+    if (this.sending.has(jobId)) return { ok: false, reason: "이미 전송 중입니다." };
+
+    const config = getConfig();
+    const api = new GarmentApi(config.baseUrl, config.apiKey);
+    const label = `${item.job.orderNumber} ${item.job.wepnpSeqno}`;
+
+    this.sending.add(jobId);
+    item.status = "printing";
+    item.errorReason = "";
+    this.events.onItemChanged?.(item);
+
+    try {
+      // 지시서가 남아 있으면 먼저 뽑는다
+      if (item.doWorkOrder) {
+        const wo = await this.printWorkOrder(jobId);
+        if (!wo.ok) throw new Error(wo.reason ?? "작업지시서 출력 실패");
+      }
+
+      if (item.doGarment) {
+        const result = await sendToDevice({
+          designPath: item.downloadPath,
+          printerName: config.garmentPrinterName,
+          settings: config.print,
+          ink,
+          needsPlateChange: item.job.needsPlateChange,
+          quantity: item.job.quantity,
+          workDir: workDir(),
+          diagnosticsDir: diagnosticsDir(),
+          cliStatePath: cliStatePath(),
+          cliPaths: resolveCliPaths(config),
+          renderDpi: config.renderDpi,
+          onLog: (level, message) => this.log(level, `${label} — ${message}`),
+        });
+        if (!result.ok) throw new Error(result.reason);
+
+        item.doGarment = false;
+        await api.markPrinted(jobId, "garment").catch(() => undefined);
+        this.log("info", `장비 전송 완료: ${label}`);
+      }
+
+      // 두 갈래가 모두 끝나면 완료로 옮긴다
+      item.status = item.doGarment || item.doWorkOrder ? "ready" : "done";
+      this.persist();
+      this.events.onItemChanged?.(item);
+      if (item.status === "done") this.evictOldDone();
+      return { ok: true };
+    } catch (error) {
+      const reason = (error as Error).message;
+      item.status = "failed";
+      item.errorReason = reason;
+      this.events.onItemChanged?.(item);
+      // 서버가 READY 로 두므로 작업자가 다시 누를 수 있다
+      if (item.doGarment) await api.markFailed(jobId, "garment", reason).catch(() => undefined);
+      this.log("error", `장비 전송 실패: ${label} — ${reason}`);
+      return { ok: false, reason };
+    } finally {
+      this.sending.delete(jobId);
+    }
+  }
+
+  /**
+   * 큐에서 지운다 — 중복·오생성 디자인을 걷어낼 때.
+   *
+   * 서버 삭제가 성공해야 로컬에서도 지운다. 로컬만 지우면 다음 폴링에서 같은 건이 다시
+   * 내려온다. 404 는 서버에 이미 없다는 뜻이므로 성공으로 본다.
+   */
+  async deleteItem(jobId: string): Promise<{ ok: boolean; reason?: string }> {
+    const item = this.ready.get(jobId);
+    if (!item) return { ok: false, reason: "이미 없는 항목입니다." };
+    if (this.sending.has(jobId)) return { ok: false, reason: "전송 중인 항목은 삭제할 수 없습니다." };
+
+    const config = getConfig();
+    const api = new GarmentApi(config.baseUrl, config.apiKey);
+    const label = `${item.job.orderNumber} ${item.job.wepnpSeqno}`;
+
+    try {
+      await api.deleteJob(jobId);
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status !== 404) {
+        this.log("error", `큐 삭제 실패: ${label} — ${(error as Error).message}`);
+        return { ok: false, reason: (error as Error).message };
+      }
+      this.log("info", `큐 삭제 — 서버에 이미 없어 로컬만 정리합니다: ${label}`);
+    }
+
+    this.ready.delete(jobId);
+    this.persist();
+    // 내려받은 디자인과 썸네일도 함께 지운다. 남기면 고객 도안이 단말에 쌓인다
+    for (const file of [item.downloadPath, ...item.thumbnailPaths]) {
+      try {
+        fs.rmSync(file, { force: true });
+      } catch {
+        // 지우지 못해도 큐에서는 빠졌다
+      }
+    }
+    this.log("info", `큐에서 삭제했습니다: ${label}`);
+    this.events.onRemoved?.(jobId);
+    return { ok: true };
   }
 
   /**
@@ -274,6 +474,20 @@ export class Agent {
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * 벤더 CLI 경로.
+ *
+ * 설정에 적어 두면 그것을 쓰고, 없으면 설치본 안의 vendor 폴더에서 찾는다.
+ * 파일명은 제품을 특정할 수 없는 중립 이름이다.
+ */
+function resolveCliPaths(config: { cliLegacyPath: string; cliProPath: string }): { legacy: string; pro: string } {
+  const dir = vendorDir();
+  return {
+    legacy: config.cliLegacyPath || path.join(dir, "cli_legacy.exe"),
+    pro: config.cliProPath || path.join(dir, "cli_pro.exe"),
+  };
 }
 
 /** 파일명에 쓸 수 없는 문자를 걷어낸다 */

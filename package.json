@@ -7,12 +7,14 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc && electron .",
-    "build:win": "pnpm build && electron-builder --win",
-    "release": "pnpm build && electron-builder --publish always",
-    "lint": "tsc --noEmit"
+    "build:win": "pnpm build && pnpm vendor && electron-builder --win",
+    "release": "pnpm build && pnpm vendor && electron-builder --publish always",
+    "lint": "tsc --noEmit",
+    "vendor": "node scripts/restore-vendor.js"
   },
   "dependencies": {
     "electron-updater": "^6.3.9",
+    "pdfjs-dist": "^6.3.289",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {

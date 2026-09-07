@@ -61,4 +61,11 @@ export type ReadyItem = {
   doWorkOrder: boolean;
   status: "ready" | "printing" | "failed" | "done";
   errorReason: string;
+  /**
+   * 카드에 보여줄 미리보기 (data URL).
+   *
+   * 화면은 로컬 파일 경로를 그대로 못 읽으므로 메인 프로세스가 만들어 내려준다.
+   * 원본은 300DPI 라 그대로 실으면 목록이 무거워져 작은 판으로 줄여 담는다.
+   */
+  thumbUrl?: string | null;
 };

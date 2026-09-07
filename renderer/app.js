@@ -3,17 +3,18 @@
 const $ = (id) => document.getElementById(id);
 const api = window.garment;
 
-// ── 공통 ──────────────────────────────────────────────
+/** 잉크 모드 — 옷 색으로 고른다 */
+const INK_WHITE_GARMENT = 0; // 흰옷: 컬러만
+const INK_COLOR_GARMENT = 2; // 컬러옷: 흰색 + 컬러
+
 const setStatus = (el, text, kind = "") => {
   el.textContent = text;
   el.className = "status" + (kind ? " " + kind : "");
 };
 
-api.getVersion().then((v) => {
-  $("version").textContent = "v" + v;
-});
+api.getVersion().then((v) => ($("version").textContent = "v" + v));
 
-// ── 연결 상태 ─────────────────────────────────────────
+// ── 설정 ──────────────────────────────────────────────
 let config = null;
 
 async function loadConfig() {
@@ -21,7 +22,8 @@ async function loadConfig() {
 
   const connected = Boolean(config.apiKey);
   $("auth-card").hidden = connected;
-  $("run-card").hidden = !connected;
+  $("queue-view").hidden = !connected || view !== "queue";
+  $("agent-toggle").disabled = !connected;
 
   const chip = $("conn");
   chip.textContent = connected ? config.tenant || "연결됨" : "연결 안 됨";
@@ -29,47 +31,87 @@ async function loadConfig() {
 
   $("garment-enabled").checked = config.garmentEnabled;
   $("work-order-enabled").checked = config.workOrderEnabled;
+  $("auto-send").checked = config.autoSend;
   $("tenant").value = config.tenant || "";
 
-  await loadPrinters();
-  updateRunDesc();
-}
+  const p = config.print;
+  $("p-cli").value = p.cli;
+  $("p-ink").value = String(p.ink);
+  $("p-resolution").value = p.resolution;
+  $("p-platen-adult").value = p.platenAdult;
+  $("p-platen-child").value = p.platenChild;
+  $("p-magnification").value = p.magnification;
+  $("p-render-dpi").value = config.renderDpi;
+  $("p-auto-fit").checked = p.autoFit;
+  $("p-auto-center").checked = p.autoCenter;
+  $("p-auto-delete").checked = p.autoDelete;
 
-function updateRunDesc() {
-  const roles = [];
-  if (config.garmentEnabled) roles.push("디자인 장비 전송");
-  if (config.workOrderEnabled) roles.push("작업지시서 인쇄");
-  $("run-desc").textContent = roles.length
-    ? `이 단말이 맡은 작업: ${roles.join(", ")}`
-    : "맡은 작업이 없습니다. 아래 설정에서 하나 이상 켜야 큐를 가져옵니다.";
+  await loadPrinters();
 }
 
 async function loadPrinters() {
-  const select = $("work-order-printer");
   const printers = await api.printers.list();
-  select.innerHTML = "";
-
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = printers.length ? "기본 프린터" : "프린터를 찾지 못했습니다";
-  select.appendChild(none);
-
-  for (const p of printers) {
-    const opt = document.createElement("option");
-    opt.value = p.name;
-    opt.textContent = p.displayName || p.name;
-    select.appendChild(opt);
+  for (const [id, saved] of [
+    ["garment-printer", config.garmentPrinterName],
+    ["work-order-printer", config.workOrderPrinterName],
+  ]) {
+    const select = $(id);
+    select.innerHTML = "";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = printers.length ? "기본 프린터" : "프린터를 찾지 못했습니다";
+    select.appendChild(none);
+    for (const pr of printers) {
+      const opt = document.createElement("option");
+      opt.value = pr.name;
+      opt.textContent = pr.displayName || pr.name;
+      select.appendChild(opt);
+    }
+    select.value = saved || "";
   }
-  select.value = config.workOrderPrinterName || "";
 }
+
+const save = async (patch) => (config = await api.config.set(patch));
+const savePrint = async (patch) => (config = await api.config.set({ print: { ...config.print, ...patch } }));
+
+$("garment-enabled").addEventListener("change", (e) => save({ garmentEnabled: e.target.checked }));
+$("work-order-enabled").addEventListener("change", (e) => save({ workOrderEnabled: e.target.checked }));
+$("auto-send").addEventListener("change", (e) => save({ autoSend: e.target.checked }));
+$("garment-printer").addEventListener("change", (e) => save({ garmentPrinterName: e.target.value }));
+$("work-order-printer").addEventListener("change", (e) => save({ workOrderPrinterName: e.target.value }));
+$("p-render-dpi").addEventListener("change", (e) => save({ renderDpi: Number(e.target.value) || 300 }));
+
+$("p-cli").addEventListener("change", (e) => savePrint({ cli: e.target.value }));
+$("p-ink").addEventListener("change", (e) => savePrint({ ink: Number(e.target.value) }));
+$("p-resolution").addEventListener("change", (e) => savePrint({ resolution: Number(e.target.value) }));
+$("p-platen-adult").addEventListener("change", (e) => savePrint({ platenAdult: Number(e.target.value) }));
+$("p-platen-child").addEventListener("change", (e) => savePrint({ platenChild: Number(e.target.value) }));
+$("p-magnification").addEventListener("change", (e) => savePrint({ magnification: e.target.value.trim() }));
+$("p-auto-fit").addEventListener("change", (e) => savePrint({ autoFit: e.target.checked }));
+$("p-auto-center").addEventListener("change", (e) => savePrint({ autoCenter: e.target.checked }));
+$("p-auto-delete").addEventListener("change", (e) => savePrint({ autoDelete: e.target.checked }));
+
+for (const btn of document.querySelectorAll("[data-open]")) {
+  btn.addEventListener("click", () => api.openFolder(btn.dataset.open));
+}
+
+// ── 화면 전환 ─────────────────────────────────────────
+let view = "queue";
+
+function setView(next) {
+  view = next;
+  const connected = Boolean(config?.apiKey);
+  $("queue-view").hidden = next !== "queue" || !connected;
+  $("settings-view").hidden = next !== "settings";
+  $("nav-settings").textContent = next === "settings" ? "출력 대기" : "설정";
+}
+
+$("nav-settings").addEventListener("click", () => setView(view === "settings" ? "queue" : "settings"));
 
 // ── 인증 ──────────────────────────────────────────────
 $("auth-start").addEventListener("click", async () => {
   const tenant = $("tenant").value.trim();
-  if (!tenant) {
-    setStatus($("auth-status"), "스토어 주소를 입력하세요.", "err");
-    return;
-  }
+  if (!tenant) return setStatus($("auth-status"), "스토어 주소를 입력하세요.", "err");
   setStatus($("auth-status"), "브라우저에서 승인을 기다리는 중...");
   try {
     const info = await api.auth.start(tenant);
@@ -79,10 +121,11 @@ $("auth-start").addEventListener("click", async () => {
   }
 });
 
-api.auth.onResult(async (result) => {
-  if (result.status === "approved") {
+api.auth.onResult(async (r) => {
+  if (r.status === "approved") {
     setStatus($("auth-status"), "연결되었습니다.", "ok");
     await loadConfig();
+    setView("queue");
   } else {
     setStatus($("auth-status"), "승인 시간이 지났습니다. 다시 시도하세요.", "err");
   }
@@ -92,19 +135,7 @@ $("reauth").addEventListener("click", async () => {
   await api.auth.cancel();
   await api.config.set({ apiKey: "" });
   await loadConfig();
-});
-
-// ── 설정 ──────────────────────────────────────────────
-$("garment-enabled").addEventListener("change", async (e) => {
-  config = await api.config.set({ garmentEnabled: e.target.checked });
-  updateRunDesc();
-});
-$("work-order-enabled").addEventListener("change", async (e) => {
-  config = await api.config.set({ workOrderEnabled: e.target.checked });
-  updateRunDesc();
-});
-$("work-order-printer").addEventListener("change", async (e) => {
-  config = await api.config.set({ workOrderPrinterName: e.target.value });
+  setView("queue");
 });
 
 // ── 폴링 ──────────────────────────────────────────────
@@ -112,7 +143,7 @@ let running = false;
 
 function renderAgentState() {
   $("agent-toggle").textContent = running ? "정지" : "시작";
-  setStatus($("agent-state"), running ? "가져오는 중" : "멈춤", running ? "ok" : "");
+  $("stat-agent").textContent = running ? "가져오는 중" : "멈춤";
 }
 
 $("agent-toggle").addEventListener("click", async () => {
@@ -125,79 +156,162 @@ api.agent.onState((s) => {
   renderAgentState();
 });
 
+// ── 확인 모달 ─────────────────────────────────────────
+let confirmResolve = null;
+
+function confirmAsk(title, message, okLabel = "삭제") {
+  $("confirm-title").textContent = title;
+  $("confirm-message").textContent = message;
+  $("confirm-ok").textContent = okLabel;
+  $("confirm").hidden = false;
+  return new Promise((resolve) => (confirmResolve = resolve));
+}
+
+const closeConfirm = (value) => {
+  $("confirm").hidden = true;
+  confirmResolve?.(value);
+  confirmResolve = null;
+};
+
+$("confirm-ok").addEventListener("click", () => closeConfirm(true));
+$("confirm-cancel").addEventListener("click", () => closeConfirm(false));
+
 // ── 대기 목록 ─────────────────────────────────────────
 const items = new Map();
+let filter = "ready";
+
+for (const tab of document.querySelectorAll(".tab")) {
+  tab.addEventListener("click", () => {
+    filter = tab.dataset.filter;
+    for (const t of document.querySelectorAll(".tab")) t.classList.toggle("on", t === tab);
+    renderQueue();
+  });
+}
+
+/** 전송 중은 대기 탭에서 함께 보여준다 — 방금 누른 건이 사라지면 안 된다 */
+const groupOf = (item) => (item.status === "printing" ? "ready" : item.status);
+
+function renderStats() {
+  const counts = { ready: 0, printing: 0, done: 0, failed: 0 };
+  for (const item of items.values()) counts[item.status] = (counts[item.status] ?? 0) + 1;
+  $("stat-ready").textContent = counts.ready;
+  $("stat-printing").textContent = counts.printing;
+  $("stat-done").textContent = counts.done;
+  $("stat-failed").textContent = counts.failed;
+}
+
+function buildCard(item) {
+  const job = item.job;
+  const card = document.createElement("div");
+  card.className = "job " + item.status;
+
+  // 삭제 — 전송 중과 완료에서는 숨긴다. 전송 중에 지우면 결과를 반영할 대상이 사라진다
+  if (item.status === "ready" || item.status === "failed") {
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "✕";
+    del.title = "큐에서 삭제";
+    del.addEventListener("click", async () => {
+      const ok = await confirmAsk(
+        "디자인 삭제",
+        `${job.orderNumber} · ${job.wepnpSeqno}\n\n되돌릴 수 없습니다. 잘못 지웠다면 관리자 주문 관리의 재출력으로 다시 보낼 수 있습니다.`
+      );
+      if (ok) await api.queue.delete(job.id);
+    });
+    card.appendChild(del);
+  }
+
+  if (item.thumbUrl) {
+    const img = document.createElement("img");
+    img.className = "thumb";
+    img.src = item.thumbUrl;
+    card.appendChild(img);
+  } else {
+    const box = document.createElement("div");
+    box.className = "thumb no-thumb";
+    box.textContent = "🖼";
+    card.appendChild(box);
+  }
+
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = job.itemTotal > 1 ? `${job.orderNumber} #${job.itemIndex}/${job.itemTotal}` : job.orderNumber;
+  card.appendChild(title);
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = job.productName + (job.optionName ? ` · ${job.optionName}` : "");
+  card.appendChild(meta);
+
+  const chips = document.createElement("div");
+  chips.className = "chips";
+  if (item.doWorkOrder) chips.appendChild(tag("📄 지시서", "info"));
+  if (job.needsPlateChange) chips.appendChild(tag("👶 플레이트 교체", "warn"));
+  if (job.quantity > 1) chips.appendChild(tag(`×${job.quantity}`));
+  if (chips.childElementCount) card.appendChild(chips);
+
+  // 옷 색을 고른다. 잉크 모드가 여기서 갈린다
+  if (item.status === "ready" || item.status === "failed") {
+    const ink = document.createElement("div");
+    ink.className = "ink";
+    ink.appendChild(inkButton("흰옷 출력", "primary", job.id, INK_WHITE_GARMENT));
+    ink.appendChild(inkButton("컬러옷 출력", "alt", job.id, INK_COLOR_GARMENT));
+    card.appendChild(ink);
+  }
+
+  const state = document.createElement("div");
+  state.className = "state";
+  if (item.status === "printing") state.textContent = "⟳ 전송 중";
+  else if (item.status === "failed") {
+    state.className = "state err";
+    state.textContent = item.errorReason || "전송 실패 · 다시 시도";
+  } else if (item.status === "done") {
+    state.className = "state ok";
+    state.textContent = "✅ 전송 완료";
+  }
+  if (state.textContent) card.appendChild(state);
+
+  return card;
+}
+
+const tag = (text, kind = "") => {
+  const el = document.createElement("span");
+  el.className = "tag" + (kind ? " " + kind : "");
+  el.textContent = text;
+  return el;
+};
+
+const inkButton = (label, cls, jobId, ink) => {
+  const btn = document.createElement("button");
+  btn.className = cls;
+  btn.textContent = label;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    await api.device.send(jobId, ink);
+  });
+  return btn;
+};
 
 function renderQueue() {
   const box = $("queue");
   box.innerHTML = "";
   for (const item of items.values()) {
-    const job = item.job;
-    const row = document.createElement("div");
-    row.className = "item";
-
-    const left = document.createElement("div");
-    const name = document.createElement("div");
-    name.className = "name";
-    name.textContent = `${job.orderNumber} · ${job.wepnpSeqno}`;
-    const sub = document.createElement("div");
-    sub.className = "sub";
-    const parts = [job.productName];
-    if (job.optionName) parts.push(job.optionName);
-    if (job.quantity > 1) parts.push(`${job.quantity}개`);
-    if (job.itemTotal > 1) parts.push(`${job.itemIndex}/${job.itemTotal}`);
-    sub.textContent = parts.join(" · ");
-    left.append(name, sub);
-
-    const right = document.createElement("div");
-    right.className = "actions";
-
-    if (item.status === "failed") {
-      const err = document.createElement("span");
-      err.className = "sub err";
-      err.textContent = item.errorReason || "실패";
-      right.appendChild(err);
-    }
-
-    if (item.doWorkOrder) {
-      const print = document.createElement("button");
-      print.className = "secondary small";
-      print.textContent = "지시서 출력";
-      print.addEventListener("click", async () => {
-        print.disabled = true;
-        const r = await api.workOrder.print(job.id);
-        if (!r.ok) print.disabled = false;
-      });
-
-      // 실물 대조용 — HTML 로 옮기면서 여백이 틀어지지 않았는지 눈으로 견준다
-      const preview = document.createElement("button");
-      preview.className = "secondary small";
-      preview.textContent = "미리보기";
-      preview.addEventListener("click", () => api.workOrder.preview(job.id));
-
-      right.append(print, preview);
-    }
-
-    if (item.doGarment) {
-      const tag = document.createElement("span");
-      tag.className = "sub";
-      tag.textContent = "디자인 대기";
-      right.appendChild(tag);
-    }
-
-    row.append(left, right);
-    box.appendChild(row);
+    if (groupOf(item) !== filter) continue;
+    box.appendChild(buildCard(item));
   }
+  renderStats();
 }
 
-api.agent.onReady((item) => {
+const upsert = (item) => {
+  const prev = items.get(item.job.id);
+  // 썸네일은 한 번 만들어 두고 재사용한다. 매번 다시 읽으면 목록이 깜빡인다
+  item.thumbUrl = prev?.thumbUrl ?? null;
   items.set(item.job.id, item);
   renderQueue();
-});
-api.agent.onChanged((item) => {
-  items.set(item.job.id, item);
-  renderQueue();
-});
+};
+
+api.agent.onReady(upsert);
+api.agent.onChanged(upsert);
 api.agent.onRemoved((jobId) => {
   items.delete(jobId);
   renderQueue();
@@ -212,9 +326,8 @@ api.onLog((entry) => {
   time.textContent = new Date(entry.at).toLocaleTimeString("ko-KR");
   line.append(time, document.createTextNode(entry.message));
   box.appendChild(line);
-  // 최근 것이 보이도록 따라 내려간다
   box.scrollTop = box.scrollHeight;
-  // 오래된 줄은 걷어낸다 — 오래 켜두면 화면이 무거워진다
+  // 오래 켜두면 화면이 무거워진다
   while (box.childElementCount > 300) box.removeChild(box.firstChild);
 });
 
@@ -224,28 +337,16 @@ function renderUpdate(state) {
   $("install").hidden = state.status !== "ready";
   $("check").disabled = state.status === "checking" || state.status === "downloading";
 
-  switch (state.status) {
-    case "checking":
-      setStatus(el, "확인 중...");
-      break;
-    case "available":
-      setStatus(el, `새 버전 ${state.version} 을 받는 중입니다.`);
-      break;
-    case "downloading":
-      setStatus(el, `받는 중... ${state.percent}%`);
-      break;
-    case "ready":
-      setStatus(el, `새 버전 ${state.version} 준비됨. 재시작하면 적용됩니다.`, "ok");
-      break;
-    case "latest":
-      setStatus(el, "최신 버전입니다.");
-      break;
-    case "error":
-      setStatus(el, state.message, "err");
-      break;
-    default:
-      setStatus(el, "");
-  }
+  const text = {
+    checking: "확인 중...",
+    available: `새 버전 ${state.version} 을 받는 중입니다.`,
+    downloading: `받는 중... ${state.percent}%`,
+    ready: `새 버전 ${state.version} 준비됨. 재시작하면 적용됩니다.`,
+    latest: "최신 버전입니다.",
+    error: state.message,
+  }[state.status];
+
+  setStatus(el, text ?? "", state.status === "ready" ? "ok" : state.status === "error" ? "err" : "");
 }
 
 api.update.onState(renderUpdate);
@@ -258,7 +359,7 @@ $("install").addEventListener("click", () => api.update.install());
   await loadConfig();
   const state = await api.agent.state();
   running = state.running;
-  for (const item of state.items) items.set(item.job.id, item);
+  for (const item of state.items) upsert(item);
   renderAgentState();
-  renderQueue();
+  setView("queue");
 })();

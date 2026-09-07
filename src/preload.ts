@@ -39,6 +39,18 @@ contextBridge.exposeInMainWorld("garment", {
     onRemoved: (cb: (payload: unknown) => void) => on("queue:removed", cb),
   },
 
+  device: {
+    /** 장비로 전송. ink 는 옷 색(0=흰옷, 2=컬러옷) */
+    send: (jobId: string, ink?: number) => ipcRenderer.invoke("device:send", jobId, ink),
+  },
+
+  queue: {
+    /** 큐에서 삭제 (중복·오생성 건 걷어내기) */
+    delete: (jobId: string) => ipcRenderer.invoke("queue:delete", jobId),
+  },
+
+  openFolder: (kind: "download" | "logs" | "config") => ipcRenderer.invoke("open:folder", kind),
+
   workOrder: {
     /** 작업지시서 인쇄 */
     print: (jobId: string) => ipcRenderer.invoke("workorder:print", jobId),

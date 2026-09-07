@@ -6,8 +6,17 @@ files:
   - dist/**
   - renderer/**
   - package.json
+  # 복원된 벤더 자산을 asar 안 vendor/ 로 넣는다.
+  # extraResources 로 넣으면 설치 폴더에 파일이 그대로 드러난다.
+  - from: .vendor-build
+    to: vendor
+    filter: ["**/*"]
 win:
   target: nsis
+# 벤더 실행 파일을 asar 밖으로 풀어야 child_process 로 부를 수 있다.
+# 이름은 그대로라 설치 폴더에서 곧바로 눈에 띄지는 않는다.
+asarUnpack:
+  - vendor/**
 nsis:
   oneClick: false
   perMachine: false

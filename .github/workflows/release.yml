@@ -27,8 +27,19 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # TODO(4단계): 벤더 가명 자산 복원 단계를 여기에 넣는다.
-      # 매핑(vendor/.dll_manifest)은 레포에 두지 않고 secret VENDOR_DLL_MANIFEST 로 주입한다.
+      # 벤더 원본 라이브러리 이름은 레포에 두지 않는다. secret 으로만 들어온다.
+      # secret 이 없으면 실행 파일만 복원되고 장비 전송 기능이 빠진 빌드가 나온다.
+      - name: Restore vendor manifest
+        env:
+          VENDOR_DLL_MANIFEST: ${{ secrets.VENDOR_DLL_MANIFEST }}
+        shell: bash
+        run: |
+          if [ -n "$VENDOR_DLL_MANIFEST" ]; then
+            printf '%s' "$VENDOR_DLL_MANIFEST" > vendor/.dll_manifest
+            echo "매니페스트 주입됨"
+          else
+            echo "::warning::VENDOR_DLL_MANIFEST 가 없습니다 — 장비 전송 기능이 빠진 빌드가 나옵니다."
+          fi
 
       - name: Build & Publish
         env:
