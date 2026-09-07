@@ -2,9 +2,10 @@ import { BrowserWindow, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { Agent } from "./agent";
-import { disposeConverter } from "./device";
+import { DeviceStatusPoller, deviceContext, disposeConverter } from "./device";
 import { pollAuth, requestAuth } from "./api";
-import { configPath, diagnosticsDir, getConfig, setConfig } from "./config";
+import { cliStatePath, configPath, diagnosticsDir, getConfig, setConfig, vendorDir } from "./config";
+import { writeLog } from "./logger";
 import type { AppConfig } from "./config";
 
 /**
@@ -15,6 +16,7 @@ import type { AppConfig } from "./config";
  */
 
 let agent: Agent | null = null;
+let statusPoller: DeviceStatusPoller | null = null;
 let window: BrowserWindow | null = null;
 
 const send = (channel: string, payload: unknown): void => {
@@ -28,13 +30,43 @@ export function setupIpc(mainWindow: BrowserWindow): void {
     onReady: (item) => send("queue:ready", item),
     onItemChanged: (item) => send("queue:changed", item),
     onRemoved: (jobId) => send("queue:removed", jobId),
-    onLog: (level, message) => send("log", { level, message, at: Date.now() }),
+    onLog: (level, message) => {
+      // 화면 로그는 앱을 닫으면 사라진다. 나중에 되짚을 수 있게 파일에도 남긴다
+      writeLog(level, message);
+      send("log", { level, message, at: Date.now() });
+    },
     onStateChange: (running) => send("agent:state", { running }),
   });
+
+  // 장비 상태는 전송 중에도 읽혀야 해서 폴링 루프와 따로 돈다
+  statusPoller = new DeviceStatusPoller(
+    () => {
+      const config = getConfig();
+      if (!config.garmentEnabled || !config.garmentPrinterName) return null;
+      return deviceContext({
+        cliPaths: {
+          legacy: config.cliLegacyPath || path.join(vendorDir(), "cli_legacy.exe"),
+          pro: config.cliProPath || path.join(vendorDir(), "cli_pro.exe"),
+        },
+        setting: config.print.cli,
+        printerName: config.garmentPrinterName,
+        diagnosticsDir: diagnosticsDir(),
+        cliStatePath: cliStatePath(),
+        onLog: writeLog,
+      });
+    },
+    (status) => send("device:status", status)
+  );
+  statusPoller.start();
+
+  ipcMain.handle("device:status", () => statusPoller?.current ?? null);
 
   // 앱이 꺼졌다 켜져도 이미 받아 둔 건이 남아 있어야 한다.
   // 서버는 그 건들을 READY 로 보고 다시 내려주지 않는다
   agent.restore();
+
+  // 현장 PC 는 사람이 상주하지 않는다. 이미 연결된 단말이면 켜자마자 폴링을 시작한다
+  if (getConfig().apiKey) agent.start();
 
   // ── 설정 ──
   ipcMain.handle("config:get", () => getConfig());
@@ -131,7 +163,11 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   // ── 폴더 열기 ── 문제 확인 때 현장에서 직접 들여다본다
   ipcMain.handle("open:folder", (_e, kind: "download" | "logs" | "config") => {
     const target =
-      kind === "download" ? getConfig().downloadDir : kind === "logs" ? diagnosticsDir() : path.dirname(configPath());
+      kind === "download"
+        ? getConfig().downloadDir
+        : kind === "logs"
+          ? path.dirname(diagnosticsDir()) // app.log 와 diagnostics 를 함께 본다
+          : path.dirname(configPath());
     fs.mkdirSync(target, { recursive: true });
     void shell.openPath(target);
     return target;
@@ -146,6 +182,8 @@ export function setupIpc(mainWindow: BrowserWindow): void {
 
 /** 창이 닫힐 때 폴링과 변환기를 멈춘다. 남겨두면 프로세스가 안 죽는다 */
 export function teardownIpc(): void {
+  statusPoller?.stop();
+  statusPoller = null;
   agent?.stop();
   agent = null;
   window = null;
