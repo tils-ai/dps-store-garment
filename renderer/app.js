@@ -32,6 +32,7 @@ async function loadConfig() {
   $("garment-enabled").checked = config.garmentEnabled;
   $("work-order-enabled").checked = config.workOrderEnabled;
   $("auto-send").checked = config.autoSend;
+  $("watch-enabled").checked = config.watchEnabled;
   $("tenant").value = config.tenant || "";
 
   const p = config.print;
@@ -77,6 +78,7 @@ const savePrint = async (patch) => (config = await api.config.set({ print: { ...
 $("garment-enabled").addEventListener("change", (e) => save({ garmentEnabled: e.target.checked }));
 $("work-order-enabled").addEventListener("change", (e) => save({ workOrderEnabled: e.target.checked }));
 $("auto-send").addEventListener("change", (e) => save({ autoSend: e.target.checked }));
+$("watch-enabled").addEventListener("change", (e) => save({ watchEnabled: e.target.checked }));
 $("garment-printer").addEventListener("change", (e) => save({ garmentPrinterName: e.target.value }));
 $("work-order-printer").addEventListener("change", (e) => save({ workOrderPrinterName: e.target.value }));
 $("p-render-dpi").addEventListener("change", (e) => save({ renderDpi: Number(e.target.value) || 300 }));
@@ -94,6 +96,32 @@ $("p-auto-delete").addEventListener("change", (e) => savePrint({ autoDelete: e.t
 for (const btn of document.querySelectorAll("[data-open]")) {
   btn.addEventListener("click", () => api.openFolder(btn.dataset.open));
 }
+
+// ── 장비 관리 ── 결과를 로그로 남겨 현장에서 성공 여부를 안다
+for (const btn of document.querySelectorAll("[data-device]")) {
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const result = await api.device.maintenance(btn.dataset.device);
+      appendLog(result.ok ? "info" : "error", `${btn.textContent.trim()}: ${result.ok ? "보냈습니다." : result.reason}`);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+$("device-log").addEventListener("click", async () => {
+  const btn = $("device-log");
+  btn.disabled = true;
+  appendLog("info", "장비 로그를 받는 중입니다. 시간이 걸릴 수 있습니다.");
+  try {
+    const result = await api.device.collectLog();
+    if (result.ok) appendLog(result.reason ? "warn" : "info", result.reason ?? `장비 로그 저장: ${result.dir}`);
+    else appendLog("error", `장비 로그 받기 실패: ${result.reason}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ── 화면 전환 ─────────────────────────────────────────
 let view = "queue";
@@ -346,18 +374,21 @@ api.agent.onRemoved((jobId) => {
 });
 
 // ── 로그 ──────────────────────────────────────────────
-api.onLog((entry) => {
+// 메인 프로세스가 밀어주는 것과 화면에서 직접 남기는 것이 같은 상자에 쌓인다
+function appendLog(level, message, at = Date.now()) {
   const box = $("log");
   const line = document.createElement("div");
-  line.className = entry.level;
+  line.className = level;
   const time = document.createElement("time");
-  time.textContent = new Date(entry.at).toLocaleTimeString("ko-KR");
-  line.append(time, document.createTextNode(entry.message));
+  time.textContent = new Date(at).toLocaleTimeString("ko-KR");
+  line.append(time, document.createTextNode(message));
   box.appendChild(line);
   box.scrollTop = box.scrollHeight;
   // 오래 켜두면 화면이 무거워진다
   while (box.childElementCount > 300) box.removeChild(box.firstChild);
-});
+}
+
+api.onLog((entry) => appendLog(entry.level, entry.message, entry.at));
 
 // ── 업데이트 ──────────────────────────────────────────
 function renderUpdate(state) {
