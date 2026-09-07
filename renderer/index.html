@@ -96,6 +96,34 @@
         </div>
 
         <div class="card">
+          <h2>감시 폴더</h2>
+          <div class="settings">
+            <label class="check"><input type="checkbox" id="watch-enabled" /> 폴더에 떨어진 파일도 출력한다</label>
+          </div>
+          <p class="hint">
+            서버 큐와 별개로, 다른 시스템이 폴더에 넣어 둔 파일(PDF·PNG·JPG)을 대기 목록에 담습니다.
+            집은 파일은 폴더 안 done 으로 옮겨지고, 담지 못한 파일은 error 로 갑니다.
+          </p>
+          <div class="row">
+            <button class="secondary" data-open="incoming">감시 폴더 열기</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>장비 관리</h2>
+          <p class="hint">LAN 으로 연결된 장비에서만 동작합니다. 출력 중에는 보낼 수 없습니다.</p>
+          <div class="row">
+            <button class="secondary" data-device="circulation">흰색 잉크 순환</button>
+            <button class="secondary" data-device="autoCleaning">자동 클리닝</button>
+            <button class="secondary" data-device="printDisable">인쇄 버튼 잠금</button>
+            <button class="secondary" data-device="printEnable">인쇄 버튼 해제</button>
+            <button class="secondary" data-device="menuLock">메뉴 잠금</button>
+            <button class="secondary" data-device="menuUnlock">메뉴 해제</button>
+            <button class="secondary" id="device-log">장비 로그 받기</button>
+          </div>
+        </div>
+
+        <div class="card">
           <h2>폴더</h2>
           <div class="row">
             <button class="secondary" data-open="download">다운로드 폴더</button>
