@@ -139,3 +139,23 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
 export { disposeConverter } from "./convert";
 export { DEFAULT_PRINT_SETTINGS, INK_COLOR_ONLY, INK_WHITE_AND_COLOR, type PrintSettings } from "./print-settings";
 export { RETURN_CODES } from "./cli";
+export { DeviceStatusPoller, readDeviceStatus, type DeviceStatus, type DeviceState } from "./status";
+
+/** 장비 상태 조회에 쓸 실행 맥락. 설정이 바뀌면 그때그때 새로 만든다 */
+export function deviceContext(opts: {
+  cliPaths: { legacy: string; pro: string };
+  setting: PrintSettings["cli"];
+  printerName: string;
+  diagnosticsDir: string;
+  cliStatePath: string;
+  onLog?: (level: "info" | "warn" | "error", message: string) => void;
+}) {
+  setCliStatePath(opts.cliStatePath);
+  return {
+    paths: opts.cliPaths,
+    setting: opts.setting,
+    printerName: opts.printerName,
+    diagnosticsDir: opts.diagnosticsDir,
+    onLog: opts.onLog,
+  };
+}
