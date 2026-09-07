@@ -1,0 +1,5 @@
+# pnpm 은 의존성의 설치 스크립트를 기본으로 막는다.
+# electron 은 postinstall 로 실행 바이너리를 받으므로 허용해야 한다.
+# 이 설정이 빠지면 electron-builder 가 바이너리를 못 찾아 빌드가 실패한다.
+allowBuilds:
+  electron: true

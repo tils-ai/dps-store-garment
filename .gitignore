@@ -1,0 +1,13 @@
+node_modules/
+dist/
+release/
+.DS_Store
+*.log
+
+# 벤더 원본 라이브러리 이름 매핑 (가명 → 원본).
+# 가명 바이너리 vendor/*.bin, *.lib 는 추적하되 원본 이름은 남기지 않는다.
+# CI 에서는 secret 으로 주입한다.
+vendor/.dll_manifest
+
+# 빌드 시 가명 자산을 원본 이름으로 복원하는 임시 폴더
+.source/

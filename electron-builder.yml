@@ -1,0 +1,22 @@
+appId: shop.dpl.store.garment
+productName: DPS Garment Printer
+directories:
+  output: release
+files:
+  - dist/**
+  - renderer/**
+  - package.json
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+publish:
+  provider: github
+  owner: tils-ai
+  repo: dps-store-garment
+  # electron-builder 는 GitHub 릴리즈를 기본 draft 로 만든다(=수동 Publish 필요).
+  # draft 는 electron-updater 가 보지 못해 자동 업데이트가 조용히 멈춘다.
+  # dps-store-desktop 에서 겪은 함정이라 release 로 고정한다.
+  releaseType: release

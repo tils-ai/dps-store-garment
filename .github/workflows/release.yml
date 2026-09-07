@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # 네이티브 모듈 리빌드가 최신 이미지의 VS 버전을 타는 일이 있어 고정한다
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@a0ea98b2dc7d387a59324835f7421c1d5f8357b4 # v6.0.5
+        with:
+          version: 11
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # TODO(4단계): 벤더 가명 자산 복원 단계를 여기에 넣는다.
+      # 매핑(vendor/.dll_manifest)은 레포에 두지 않고 secret VENDOR_DLL_MANIFEST 로 주입한다.
+
+      - name: Build & Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm release

@@ -1,0 +1,24 @@
+{
+  "name": "dps-store-garment",
+  "version": "0.1.0",
+  "description": "가먼트 프린터 출력 클라이언트",
+  "main": "dist/main.js",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc && electron .",
+    "build:win": "pnpm build && electron-builder --win",
+    "release": "pnpm build && electron-builder --publish always",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "electron-store": "^10.0.0",
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,41 @@
+# dps-store-garment
+
+가먼트 프린터 출력 클라이언트 (Windows, Electron)
+
+주문 관리에서 넘어온 출력 큐를 받아 디자인과 작업지시서를 출력한다.
+`equip-sync-g-module`(Python) 을 대체하며, **자동 업데이트**를 지원한다.
+
+## 개발
+
+```bash
+pnpm install
+pnpm dev        # 빌드 후 실행
+pnpm lint       # 타입 검사
+pnpm build:win  # 설치본 생성 (release/)
+```
+
+## 배포
+
+태그를 밀면 GitHub Actions 가 빌드해 릴리즈를 발행한다.
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+- 릴리즈는 **draft 가 아니라 published** 로 나가야 한다. draft 는 자동 업데이트가 보지 못한다
+  (`electron-builder.yml` 의 `releaseType: release`)
+- 과거 릴리즈는 최신 2개만 유지한다
+
+## 자동 업데이트
+
+확인 시점은 **앱 시작 시**와 **설정의 수동 버튼** 둘뿐이다. 주기 확인은 하지 않는다.
+출력 도중 재시작을 부추기지 않기 위해서다. 받아둔 업데이트가 있어도 자동으로 재시작하지 않고,
+적용 시점은 작업자가 고른다.
+
+## 진행 상황
+
+- [x] 1단계 — Electron 뼈대, 자동 업데이트
+- [ ] 2단계 — 서버 연동 (인증·폴링·다운로드·상태 보고)
+- [ ] 3단계 — 작업지시서 렌더·인쇄
+- [ ] 4단계 — 디자인 변환, 장비 연동
+- [ ] 5단계 — 출력 대기 화면
