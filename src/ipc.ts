@@ -23,6 +23,7 @@ export function setupIpc(mainWindow: BrowserWindow): void {
 
   agent = new Agent({
     onReady: (item) => send("queue:ready", item),
+    onItemChanged: (item) => send("queue:changed", item),
     onRemoved: (jobId) => send("queue:removed", jobId),
     onLog: (level, message) => send("log", { level, message, at: Date.now() }),
     onStateChange: (running) => send("agent:state", { running }),
@@ -96,6 +97,18 @@ export function setupIpc(mainWindow: BrowserWindow): void {
     running: agent?.isRunning ?? false,
     items: agent?.snapshot() ?? [],
   }));
+
+  // ── 작업지시서 ──
+  ipcMain.handle("workorder:print", async (_e, jobId: string) => {
+    if (!agent) return { ok: false, reason: "준비되지 않았습니다." };
+    return agent.printWorkOrder(jobId);
+  });
+
+  // 실물 대조용 — 인쇄 결과가 현행과 같은지 눈으로 견주기 위해 PDF 로 떨군다
+  ipcMain.handle("workorder:preview", async (_e, jobId: string) => {
+    if (!agent) return { ok: false, reason: "준비되지 않았습니다." };
+    return agent.previewWorkOrder(jobId);
+  });
 
   // ── 프린터 목록 ──
   ipcMain.handle("printers:list", async () => {

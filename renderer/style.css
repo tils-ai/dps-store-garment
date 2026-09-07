@@ -92,3 +92,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .log .warn { color: var(--warning); }
 .log .error { color: var(--danger); }
 .log time { color: var(--text-muted); margin-right: 8px; }
+
+.actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+button.small { padding: 6px 12px; font-size: 13px; }
+.sub.err { color: var(--danger); }

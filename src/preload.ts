@@ -35,7 +35,15 @@ contextBridge.exposeInMainWorld("garment", {
     state: () => ipcRenderer.invoke("agent:state"),
     onState: (cb: (payload: unknown) => void) => on("agent:state", cb),
     onReady: (cb: (payload: unknown) => void) => on("queue:ready", cb),
+    onChanged: (cb: (payload: unknown) => void) => on("queue:changed", cb),
     onRemoved: (cb: (payload: unknown) => void) => on("queue:removed", cb),
+  },
+
+  workOrder: {
+    /** 작업지시서 인쇄 */
+    print: (jobId: string) => ipcRenderer.invoke("workorder:print", jobId),
+    /** 실물 대조용 PDF 저장 (검증 중에만 쓴다) */
+    preview: (jobId: string) => ipcRenderer.invoke("workorder:preview", jobId),
   },
 
   printers: {

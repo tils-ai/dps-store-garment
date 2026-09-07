@@ -150,11 +150,40 @@ function renderQueue() {
     left.append(name, sub);
 
     const right = document.createElement("div");
-    right.className = "sub";
-    const roles = [];
-    if (item.doGarment) roles.push("디자인");
-    if (item.doWorkOrder) roles.push("지시서");
-    right.textContent = roles.join(" + ") || "-";
+    right.className = "actions";
+
+    if (item.status === "failed") {
+      const err = document.createElement("span");
+      err.className = "sub err";
+      err.textContent = item.errorReason || "실패";
+      right.appendChild(err);
+    }
+
+    if (item.doWorkOrder) {
+      const print = document.createElement("button");
+      print.className = "secondary small";
+      print.textContent = "지시서 출력";
+      print.addEventListener("click", async () => {
+        print.disabled = true;
+        const r = await api.workOrder.print(job.id);
+        if (!r.ok) print.disabled = false;
+      });
+
+      // 실물 대조용 — HTML 로 옮기면서 여백이 틀어지지 않았는지 눈으로 견준다
+      const preview = document.createElement("button");
+      preview.className = "secondary small";
+      preview.textContent = "미리보기";
+      preview.addEventListener("click", () => api.workOrder.preview(job.id));
+
+      right.append(print, preview);
+    }
+
+    if (item.doGarment) {
+      const tag = document.createElement("span");
+      tag.className = "sub";
+      tag.textContent = "디자인 대기";
+      right.appendChild(tag);
+    }
 
     row.append(left, right);
     box.appendChild(row);
@@ -162,6 +191,10 @@ function renderQueue() {
 }
 
 api.agent.onReady((item) => {
+  items.set(item.job.id, item);
+  renderQueue();
+});
+api.agent.onChanged((item) => {
   items.set(item.job.id, item);
   renderQueue();
 });

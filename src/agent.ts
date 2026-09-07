@@ -2,7 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { GarmentApi } from "./api";
 import { getConfig } from "./config";
+import { printHtml, saveHtmlAsPdf } from "./printer";
 import type { GarmentJob, ReadyItem } from "./types";
+import { buildWorkOrderHtml } from "./work-order";
+import { fileToDataUrl, makeQrDataUrl } from "./work-order-assets";
 
 /**
  * 폴링 에이전트.
@@ -16,6 +19,7 @@ const MAX_BACKOFF_SEC = 30;
 
 export type AgentEvents = {
   onReady?: (item: ReadyItem) => void;
+  onItemChanged?: (item: ReadyItem) => void;
   onRemoved?: (jobId: string) => void;
   onLog?: (level: "info" | "warn" | "error", message: string) => void;
   onStateChange?: (running: boolean) => void;
@@ -176,6 +180,74 @@ export class Agent {
       if (doGarment) await api.markFailed(job.id, "garment", reason).catch(() => undefined);
       if (doWorkOrder) await api.markFailed(job.id, "workOrder", reason).catch(() => undefined);
     }
+  }
+
+  /**
+   * 작업지시서를 인쇄한다. 작업자가 전송을 누를 때 호출한다.
+   *
+   * 지시서를 먼저, 디자인을 나중에 보낸다. 순서를 바꾸면 옷이 먼저 나오고 그 옷이
+   * 어느 주문인지 적힌 종이가 늦게 나와 현장에서 짝이 어긋난다.
+   */
+  async printWorkOrder(jobId: string): Promise<{ ok: boolean; reason?: string }> {
+    const item = this.ready.get(jobId);
+    if (!item) return { ok: false, reason: "이미 없는 항목입니다." };
+    if (!item.doWorkOrder) return { ok: true };
+
+    const config = getConfig();
+    const api = new GarmentApi(config.baseUrl, config.apiKey);
+    const label = `${item.job.orderNumber} ${item.job.wepnpSeqno}`;
+
+    try {
+      const result = await printHtml(await this.renderWorkOrder(item), config.workOrderPrinterName);
+      if (!result.ok) throw new Error(result.reason);
+
+      item.doWorkOrder = false;
+      this.events.onItemChanged?.(item);
+      await api.markPrinted(jobId, "workOrder").catch(() => undefined);
+      this.log("info", `작업지시서 출력 완료: ${label}`);
+      return { ok: true };
+    } catch (error) {
+      const reason = (error as Error).message;
+      item.status = "failed";
+      item.errorReason = reason;
+      this.events.onItemChanged?.(item);
+      await api.markFailed(jobId, "workOrder", reason).catch(() => undefined);
+      this.log("error", `작업지시서 출력 실패: ${label} — ${reason}`);
+      return { ok: false, reason };
+    }
+  }
+
+  /**
+   * 실물 대조용 미리보기 — 지시서를 PDF 로 떨군다.
+   *
+   * reportlab 좌표에서 HTML 로 옮기면 여백·배율이 틀어질 수 있다. 인쇄물을 현행과
+   * 견줘 볼 수 있어야 하므로 검증 중에는 이 경로를 쓴다. 운영 흐름에는 끼지 않는다.
+   */
+  async previewWorkOrder(jobId: string): Promise<{ ok: boolean; path?: string; reason?: string }> {
+    const item = this.ready.get(jobId);
+    if (!item) return { ok: false, reason: "이미 없는 항목입니다." };
+
+    const config = getConfig();
+    const dest = path.join(config.downloadDir, `${item.job.orderNumber}_${item.job.wepnpSeqno}_지시서미리보기.pdf`);
+    const result = await saveHtmlAsPdf(await this.renderWorkOrder(item), dest);
+    if (!result.ok) return { ok: false, reason: result.reason };
+
+    this.log("info", `지시서 미리보기 저장: ${dest}`);
+    return { ok: true, path: dest };
+  }
+
+  /** 지시서 HTML 조립 — 인쇄와 미리보기가 같은 것을 쓴다 */
+  private async renderWorkOrder(item: ReadyItem): Promise<string> {
+    const config = getConfig();
+    return buildWorkOrderHtml({
+      job: item.job,
+      // 생산 이미지는 실제로 출력한 도안이다. 이미지가 아닌 형식(PDF 등)이면 칸을 비운다
+      designImageDataUrl: fileToDataUrl(item.downloadPath),
+      thumbnailDataUrls: item.thumbnailPaths.map(fileToDataUrl).filter((v): v is string => v !== null),
+      qrDataUrl: await makeQrDataUrl(item.job.workOrder.workUrl),
+      designFileName: path.basename(item.downloadPath),
+      printerName: config.garmentPrinterName,
+    });
   }
 
   private async report(api: GarmentApi, jobId: string, target: "garment" | "workOrder"): Promise<void> {
