@@ -1,13 +1,14 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "node:path";
 import { setupIpc, teardownIpc } from "./ipc";
+import { closeLog, writeLog } from "./logger";
 import { check, setupUpdater } from "./updater";
 
 /**
  * 가먼트 프린터 출력 클라이언트.
  *
- * 1단계 뼈대 — 창을 띄우고 자동 업데이트가 도는 것까지만 한다.
- * 서버 폴링·인쇄·장비 연동은 이후 단계에서 붙인다.
+ * 창 하나로 폴링·인쇄·장비 전송을 모두 다룬다. 현장 PC 는 사람이 상주하지 않는 경우가
+ * 많아, 창을 닫아도 진행 중인 일이 끊기지 않도록 상태는 메인 프로세스가 들고 있는다.
  */
 
 let mainWindow: BrowserWindow | null = null;
@@ -58,6 +59,7 @@ if (!gotLock) {
 
     createWindow();
     if (mainWindow) {
+      writeLog("info", `앱 시작 v${app.getVersion()}`);
       setupIpc(mainWindow);
       setupUpdater(mainWindow, app.getVersion());
       // 앱 시작 시 한 번 확인. 이후로는 수동 버튼으로만 확인한다
@@ -74,5 +76,9 @@ if (!gotLock) {
   });
 
   // 폴링이 남으면 다음 실행에서 같은 큐를 이중으로 가져간다
-  app.on("before-quit", () => teardownIpc());
+  app.on("before-quit", () => {
+    writeLog("info", "앱 종료");
+    teardownIpc();
+    closeLog();
+  });
 }
