@@ -29,6 +29,16 @@ export type AppConfig = {
   /** 작업지시서를 뽑을 일반 프린터 이름 */
   workOrderPrinterName: string;
 
+  /**
+   * 감시 폴더를 볼지.
+   *
+   * 서버 큐와 별개로, 다른 시스템이 폴더에 떨궈 놓은 파일도 출력한다. 기본은 꺼짐이다 —
+   * 켜 두면 폴더에 잘못 들어온 파일까지 대기 목록에 올라온다.
+   */
+  watchEnabled: boolean;
+  /** 감시할 폴더 */
+  incomingDir: string;
+
   /** 폴링 간격(초). 서버가 값을 주면 그쪽을 따른다 */
   pollIntervalSec: number;
   /** 내려받은 파일을 둘 폴더 */
@@ -61,6 +71,8 @@ const defaults = (): AppConfig => ({
   workOrderEnabled: false,
   garmentPrinterName: "",
   workOrderPrinterName: "",
+  watchEnabled: false,
+  incomingDir: path.join(app.getPath("userData"), "incoming"),
   pollIntervalSec: 5,
   downloadDir: path.join(app.getPath("userData"), "downloads"),
   autoSend: false,
