@@ -3,9 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { Agent } from "./agent";
 import { DeviceStatusPoller, deviceContext, disposeConverter } from "./device";
+import { collectDeviceLog, runMaintenance, type MaintenanceCommand } from "./device/maintenance";
 import { pollAuth, requestAuth } from "./api";
 import { cliStatePath, configPath, diagnosticsDir, getConfig, setConfig, vendorDir } from "./config";
 import { writeLog } from "./logger";
+import { IncomingWatcher } from "./watcher";
 import type { AppConfig } from "./config";
 
 /**
@@ -17,6 +19,7 @@ import type { AppConfig } from "./config";
 
 let agent: Agent | null = null;
 let statusPoller: DeviceStatusPoller | null = null;
+let watcher: IncomingWatcher | null = null;
 let window: BrowserWindow | null = null;
 
 const send = (channel: string, payload: unknown): void => {
@@ -39,25 +42,20 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   });
 
   // 장비 상태는 전송 중에도 읽혀야 해서 폴링 루프와 따로 돈다
-  statusPoller = new DeviceStatusPoller(
-    () => {
-      const config = getConfig();
-      if (!config.garmentEnabled || !config.garmentPrinterName) return null;
-      return deviceContext({
-        cliPaths: {
-          legacy: config.cliLegacyPath || path.join(vendorDir(), "cli_legacy.exe"),
-          pro: config.cliProPath || path.join(vendorDir(), "cli_pro.exe"),
-        },
-        setting: config.print.cli,
-        printerName: config.garmentPrinterName,
-        diagnosticsDir: diagnosticsDir(),
-        cliStatePath: cliStatePath(),
-        onLog: writeLog,
-      });
-    },
-    (status) => send("device:status", status)
-  );
+  statusPoller = new DeviceStatusPoller(currentDeviceContext, (status) => send("device:status", status));
   statusPoller.start();
+
+  // 감시 폴더 — 서버 큐와 별개로 떨궈진 파일도 집는다
+  watcher = new IncomingWatcher({
+    onFile: async (filePath) => {
+      await agent?.addLocalFile(filePath);
+    },
+    onLog: (level, message) => {
+      writeLog(level, message);
+      send("log", { level, message, at: Date.now() });
+    },
+  });
+  syncWatcher();
 
   ipcMain.handle("device:status", () => statusPoller?.current ?? null);
 
@@ -70,7 +68,12 @@ export function setupIpc(mainWindow: BrowserWindow): void {
 
   // ── 설정 ──
   ipcMain.handle("config:get", () => getConfig());
-  ipcMain.handle("config:set", (_e, patch: Partial<AppConfig>) => setConfig(patch));
+  ipcMain.handle("config:set", (_e, patch: Partial<AppConfig>) => {
+    const next = setConfig(patch);
+    // 감시 폴더 설정은 저장만 해서는 반영되지 않는다. 바로 다시 건다
+    syncWatcher();
+    return next;
+  });
   ipcMain.handle("config:path", () => configPath());
 
   // ── 인증 ──
@@ -161,16 +164,37 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   });
 
   // ── 폴더 열기 ── 문제 확인 때 현장에서 직접 들여다본다
-  ipcMain.handle("open:folder", (_e, kind: "download" | "logs" | "config") => {
+  ipcMain.handle("open:folder", (_e, kind: "download" | "incoming" | "logs" | "config") => {
     const target =
       kind === "download"
         ? getConfig().downloadDir
-        : kind === "logs"
+        : kind === "incoming"
+          ? getConfig().incomingDir
+          : kind === "logs"
           ? path.dirname(diagnosticsDir()) // app.log 와 diagnostics 를 함께 본다
           : path.dirname(configPath());
     fs.mkdirSync(target, { recursive: true });
     void shell.openPath(target);
     return target;
+  });
+
+  // ── 장비 관리 ── 모두 LAN 연결 장비 전용이다
+  ipcMain.handle("device:maintenance", async (_e, command: MaintenanceCommand) => {
+    const ctx = currentDeviceContext();
+    if (!ctx) return { ok: false, reason: "장비 전송이 꺼져 있거나 장비가 선택되지 않았습니다." };
+    // 출력 중에 보내면 진행 중인 작업이 흐트러진다
+    if (statusPoller?.current?.printing) return { ok: false, reason: "출력 중에는 보낼 수 없습니다." };
+    const result = await runMaintenance(ctx, command);
+    writeLog(result.ok ? "info" : "warn", `장비 관리 ${command}: ${result.ok ? "성공" : result.reason}`);
+    return result;
+  });
+
+  ipcMain.handle("device:log", async () => {
+    const ctx = currentDeviceContext();
+    if (!ctx) return { ok: false, reason: "장비 전송이 꺼져 있거나 장비가 선택되지 않았습니다." };
+    const result = await collectDeviceLog(ctx, diagnosticsDir());
+    if (result.ok && result.dir) void shell.openPath(result.dir);
+    return result;
   });
 
   // ── 프린터 목록 ──
@@ -180,10 +204,36 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   });
 }
 
+/** 장비 명령에 쓸 실행 맥락. 장비 전송이 꺼져 있거나 장비가 없으면 null */
+function currentDeviceContext() {
+  const config = getConfig();
+  if (!config.garmentEnabled || !config.garmentPrinterName) return null;
+  return deviceContext({
+    cliPaths: {
+      legacy: config.cliLegacyPath || path.join(vendorDir(), "cli_legacy.exe"),
+      pro: config.cliProPath || path.join(vendorDir(), "cli_pro.exe"),
+    },
+    setting: config.print.cli,
+    printerName: config.garmentPrinterName,
+    diagnosticsDir: diagnosticsDir(),
+    cliStatePath: cliStatePath(),
+    onLog: writeLog,
+  });
+}
+
+/** 설정에 맞춰 감시 폴더를 걸거나 푼다 */
+function syncWatcher(): void {
+  const config = getConfig();
+  if (config.watchEnabled) watcher?.start(config.incomingDir);
+  else watcher?.stop();
+}
+
 /** 창이 닫힐 때 폴링과 변환기를 멈춘다. 남겨두면 프로세스가 안 죽는다 */
 export function teardownIpc(): void {
   statusPoller?.stop();
   statusPoller = null;
+  watcher?.stop();
+  watcher = null;
   agent?.stop();
   agent = null;
   window = null;

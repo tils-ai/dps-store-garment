@@ -45,6 +45,10 @@ contextBridge.exposeInMainWorld("garment", {
     /** 장비 상태 (LAN 연결일 때만. 아니면 null = 오프라인) */
     status: () => ipcRenderer.invoke("device:status"),
     onStatus: (cb: (payload: unknown) => void) => on("device:status", cb),
+    /** 관리 명령 (순환·클리닝·잠금). LAN 연결 장비 전용 */
+    maintenance: (command: string) => ipcRenderer.invoke("device:maintenance", command),
+    /** 장비 로그를 내려받아 이력 CSV 로 푼다 */
+    collectLog: () => ipcRenderer.invoke("device:log"),
   },
 
   queue: {
@@ -52,7 +56,7 @@ contextBridge.exposeInMainWorld("garment", {
     delete: (jobId: string) => ipcRenderer.invoke("queue:delete", jobId),
   },
 
-  openFolder: (kind: "download" | "logs" | "config") => ipcRenderer.invoke("open:folder", kind),
+  openFolder: (kind: "download" | "incoming" | "logs" | "config") => ipcRenderer.invoke("open:folder", kind),
 
   workOrder: {
     /** 작업지시서 인쇄 */
