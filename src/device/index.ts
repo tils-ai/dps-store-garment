@@ -36,7 +36,7 @@ export type SendOptions = {
   cliStatePath: string;
   /** 벤더 CLI 경로 */
   cliPaths: { legacy: string; pro: string };
-  /** PDF 를 래스터화할 해상도 */
+  /** PNG 이 해상도를 밝히지 않을 때 쓸 기본값 */
   renderDpi: number;
   /** 보낸 인쇄 데이터를 되풀어 진단 폴더에 남길지 */
   extractDiagnostic?: boolean;
