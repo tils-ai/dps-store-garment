@@ -33,6 +33,9 @@ export type DeviceStatus = {
   errors: string[];
   warnings: string[];
   raw: string;
+  /** 장비가 지금 물고 있는 파일과 작업 번호. 출력 중일 때만 채워진다 */
+  currentFile: string;
+  currentJobId: string;
 };
 
 /** 아주 단순한 CSV 분해. 상태 파일은 따옴표 이스케이프를 쓰지 않는다 */
@@ -77,7 +80,17 @@ export function parseStatusRows(rows: string[][]): DeviceStatus | null {
   else if (value & PS_STANDBY) state = "standby";
   else if (value & PS_MENU_ACTIVE) state = "menu";
 
-  return { state, printing, errors, warnings, raw };
+  const first = (key: string): string => (fields.get(key) ?? [""])[0] ?? "";
+
+  return {
+    state,
+    printing,
+    errors,
+    warnings,
+    raw,
+    currentFile: first("Current File"),
+    currentJobId: first("Current JobID"),
+  };
 }
 
 /** 상태를 한 번 읽는다. LAN 이 아니거나 꺼져 있으면 null (= 오프라인) */
@@ -111,11 +124,16 @@ export async function readDeviceStatus(ctx: CliContext): Promise<DeviceStatus | 
 export class DeviceStatusPoller {
   private timer: NodeJS.Timeout | null = null;
   private last: DeviceStatus | null = null;
+  /** 오류 상태가 이어지는 동안 매 주기 알리지 않기 위한 표식 */
+  private wasError = false;
 
   constructor(
     private readonly getContext: () => CliContext | null,
     private readonly onStatus: (status: DeviceStatus | null) => void,
-    private readonly intervalMs = 15_000
+    /** 조회 간격(ms)을 그때그때 설정에서 읽는다 */
+    private readonly getIntervalMs: () => number,
+    /** 정상에서 오류로 넘어가는 순간 한 번만 부른다 */
+    private readonly onErrorEdge?: (status: DeviceStatus) => void
   ) {}
 
   get current(): DeviceStatus | null {
@@ -141,7 +159,12 @@ export class DeviceStatusPoller {
         this.last = status;
         this.onStatus(status);
       }
+
+      // 오류가 이어지는 동안 매 주기 알리면 로그가 오류로만 채워진다. 넘어가는 순간만 알린다
+      const isError = status?.state === "error";
+      if (isError && !this.wasError && status) this.onErrorEdge?.(status);
+      this.wasError = isError;
     }
-    this.timer = setTimeout(() => void this.tick(), this.intervalMs);
+    this.timer = setTimeout(() => void this.tick(), Math.max(1000, this.getIntervalMs()));
   }
 }

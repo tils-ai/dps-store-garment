@@ -61,6 +61,8 @@ export type ReadyItem = {
   doWorkOrder: boolean;
   status: "ready" | "printing" | "failed" | "done";
   errorReason: string;
+  /** 어느 장비로 보냈는지. 여러 대를 물린 단말에서 짝을 찾을 때 쓴다 */
+  printerName?: string;
   /**
    * 감시 폴더에서 집어 온 건인지.
    *

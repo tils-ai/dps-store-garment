@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { GarmentApi } from "./api";
-import { cliStatePath, diagnosticsDir, getConfig, vendorDir, workDir } from "./config";
+import { cliStatePath, diagnosticsDir, getConfig, primaryPrinter, printerPool, vendorDir, workDir } from "./config";
+import type { AppConfig } from "./config";
 import { sendToDevice } from "./device";
 import { printHtml, saveHtmlAsPdf } from "./printer";
 import type { GarmentJob, ReadyItem } from "./types";
@@ -42,6 +43,16 @@ export class Agent {
   private readonly ready = new Map<string, ReadyItem>();
   /** 전송 중인 건 — 같은 건을 두 번 보내지 않게 막는다 */
   private readonly sending = new Set<string>();
+  /**
+   * 장비별 실행 줄.
+   *
+   * 같은 장비에 두 건을 동시에 밀면 벤더 CLI 와 장비가 엉킨다. 장비마다 줄을 하나씩 두어
+   * **한 건씩 차례로** 보내되, 장비가 여럿이면 서로 다른 줄이라 동시에 나간다.
+   * 파이썬 판이 프린터당 워커 스레드를 하나씩 띄우던 것과 같은 구조다.
+   */
+  private readonly lanes = new Map<string, Promise<unknown>>();
+  /** 라운드로빈 커서 */
+  private laneCursor = 0;
 
   constructor(private readonly events: AgentEvents = {}) {}
 
@@ -335,10 +346,12 @@ export class Agent {
     }
   }
 
-  /** 집은 원본을 감시 폴더 하위로 치운다. 남겨두면 다음 훑기에서 또 집는다 */
+  /** 집은 원본을 치운다. 남겨두면 다음 훑기에서 또 집는다 */
   private archive(filePath: string, kind: "done" | "error"): void {
     try {
-      const dest = uniquePath(path.join(path.dirname(filePath), kind, path.basename(filePath)));
+      const config = getConfig();
+      const dir = kind === "done" ? config.doneDir : config.errorDir;
+      const dest = uniquePath(path.join(dir || path.join(path.dirname(filePath), kind), path.basename(filePath)));
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.renameSync(filePath, dest);
     } catch (error) {
@@ -396,60 +409,97 @@ export class Agent {
     const config = getConfig();
     const api = new GarmentApi(config.baseUrl, config.apiKey);
     const label = `${item.job.orderNumber} ${item.job.wepnpSeqno}`;
+    const printerName = this.nextPrinter(config);
 
     this.sending.add(jobId);
     item.status = "printing";
     item.errorReason = "";
+    item.printerName = printerName;
     this.events.onItemChanged?.(item);
 
-    try {
-      // 지시서가 남아 있으면 먼저 뽑는다
-      if (item.doWorkOrder) {
-        const wo = await this.printWorkOrder(jobId);
-        if (!wo.ok) throw new Error(wo.reason ?? "작업지시서 출력 실패");
+    // 이 장비의 줄에 세운다. 앞 건이 끝나야 시작한다
+    return this.onLane(printerName, async () => {
+      try {
+        // 지시서가 남아 있으면 먼저 뽑는다
+        if (item.doWorkOrder) {
+          const wo = await this.printWorkOrder(jobId);
+          if (!wo.ok) throw new Error(wo.reason ?? "작업지시서 출력 실패");
+        }
+
+        if (item.doGarment) {
+          const result = await sendToDevice({
+            designPath: item.downloadPath,
+            printerName,
+            settings: config.print,
+            ink,
+            needsPlateChange: item.job.needsPlateChange,
+            quantity: item.job.quantity,
+            workDir: workDir(),
+            diagnosticsDir: diagnosticsDir(),
+            cliStatePath: cliStatePath(),
+            cliPaths: resolveCliPaths(config),
+            renderDpi: config.renderDpi,
+            extractDiagnostic: config.extractDiagnostic,
+            mode: config.garmentMode,
+            onLog: (level, message) => this.log(level, `${label} — ${message}`),
+          });
+          if (!result.ok) throw new Error(result.reason);
+
+          item.doGarment = false;
+          if (!item.local) await api.markPrinted(jobId, "garment").catch(() => undefined);
+          this.log("info", `장비 전송 완료: ${label}${printerName ? ` → ${printerName}` : ""}`);
+        }
+
+        // 두 갈래가 모두 끝나면 완료로 옮긴다
+        item.status = item.doGarment || item.doWorkOrder ? "ready" : "done";
+        this.persist();
+        this.events.onItemChanged?.(item);
+        if (item.status === "done") this.evictOldDone();
+        return { ok: true };
+      } catch (error) {
+        const reason = (error as Error).message;
+        item.status = "failed";
+        item.errorReason = reason;
+        this.events.onItemChanged?.(item);
+        // 서버가 READY 로 두므로 작업자가 다시 누를 수 있다
+        if (item.doGarment && !item.local) await api.markFailed(jobId, "garment", reason).catch(() => undefined);
+        this.log("error", `장비 전송 실패: ${label} — ${reason}`);
+        return { ok: false, reason };
+      } finally {
+        this.sending.delete(jobId);
       }
+    });
+  }
 
-      if (item.doGarment) {
-        const result = await sendToDevice({
-          designPath: item.downloadPath,
-          printerName: config.garmentPrinterName,
-          settings: config.print,
-          ink,
-          needsPlateChange: item.job.needsPlateChange,
-          quantity: item.job.quantity,
-          workDir: workDir(),
-          diagnosticsDir: diagnosticsDir(),
-          cliStatePath: cliStatePath(),
-          cliPaths: resolveCliPaths(config),
-          renderDpi: config.renderDpi,
-          extractDiagnostic: config.extractDiagnostic,
-          onLog: (level, message) => this.log(level, `${label} — ${message}`),
-        });
-        if (!result.ok) throw new Error(result.reason);
+  /**
+   * 다음 건을 맡길 장비를 고른다.
+   *
+   * 라운드로빈이면 번갈아, `single` 이면 첫 대만. 목록이 비면 빈 이름 — 기본 프린터로 간다.
+   */
+  private nextPrinter(config: AppConfig): string {
+    const pool = printerPool(config);
+    const name = pool[this.laneCursor % pool.length];
+    this.laneCursor = (this.laneCursor + 1) % pool.length;
+    return name;
+  }
 
-        item.doGarment = false;
-        if (!item.local) await api.markPrinted(jobId, "garment").catch(() => undefined);
-        this.log("info", `장비 전송 완료: ${label}`);
-      }
-
-      // 두 갈래가 모두 끝나면 완료로 옮긴다
-      item.status = item.doGarment || item.doWorkOrder ? "ready" : "done";
-      this.persist();
-      this.events.onItemChanged?.(item);
-      if (item.status === "done") this.evictOldDone();
-      return { ok: true };
-    } catch (error) {
-      const reason = (error as Error).message;
-      item.status = "failed";
-      item.errorReason = reason;
-      this.events.onItemChanged?.(item);
-      // 서버가 READY 로 두므로 작업자가 다시 누를 수 있다
-      if (item.doGarment && !item.local) await api.markFailed(jobId, "garment", reason).catch(() => undefined);
-      this.log("error", `장비 전송 실패: ${label} — ${reason}`);
-      return { ok: false, reason };
-    } finally {
-      this.sending.delete(jobId);
-    }
+  /**
+   * 장비 줄에 세워 차례로 실행한다.
+   *
+   * 앞 건이 실패해도 뒤 건은 돌아야 하므로 성공·실패 모두 이어 붙인다. 줄을 무한정
+   * 늘리지 않도록, 실행이 끝나면 결과를 버린 약속만 남긴다.
+   */
+  private onLane<T>(printerName: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.lanes.get(printerName) ?? Promise.resolve();
+    const run = previous.then(task, task);
+    this.lanes.set(
+      printerName,
+      run.then(
+        () => undefined,
+        () => undefined
+      )
+    );
+    return run;
   }
 
   /**
@@ -523,7 +573,8 @@ export class Agent {
       thumbnailDataUrls: item.thumbnailPaths.map(fileToDataUrl).filter((v): v is string => v !== null),
       qrDataUrl: await makeQrDataUrl(item.job.workOrder.workUrl),
       designFileName: path.basename(item.downloadPath),
-      printerName: config.garmentPrinterName,
+      // 아직 배정 전이면 대표 장비 이름을 싣는다. 지시서에 빈 칸을 두지 않는다
+      printerName: item.printerName || primaryPrinter(config),
     });
   }
 
