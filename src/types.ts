@@ -34,6 +34,8 @@ export type GarmentJob = {
     workUrl: string;
     /** 에디터 미리보기 (인쇄 면 수만큼). 작업지시서에 생산 이미지와 나란히 싣는다 */
     thumbnailUrls: string[];
+    /** 주문일시(ISO). 지시서 상단 밴드에 적는다. 구버전 서버는 주지 않는다 */
+    orderedAt?: string;
   };
   createdAt: string;
 };
