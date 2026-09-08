@@ -18,7 +18,12 @@ import { fileToDataUrl, makeQrDataUrl, makeThumbnail } from "./work-order-assets
  */
 
 /** 큐가 비었을 때 폴링을 늦추는 상한(초). 서버와 네트워크를 아낀다 */
-const MAX_BACKOFF_SEC = 30;
+/** 빈 응답이 [n]번 이어지면 [초] 간격으로 늦춘다 (파이썬 판과 같은 표) */
+const BACKOFF_STEPS: [number, number][] = [
+  [3, 10],
+  [6, 20],
+  [10, 30],
+];
 
 /**
  * 완료 이력을 몇 건까지 남길지.
@@ -157,12 +162,19 @@ export class Agent {
     this.events.onLog?.(level, message);
   }
 
-  /** 다음 폴링까지 기다릴 시간. 빈 응답이 이어지면 점점 늦춘다 */
+  /**
+   * 다음 폴링까지 기다릴 시간. 빈 응답이 이어지면 점점 늦춘다.
+   *
+   * 구간은 파이썬 판(`_BACKOFF_THRESHOLDS`)과 같은 값이다. 한가한 매장이 서버를 계속
+   * 두드리지 않으면서, 주문이 들어오는 시간대에는 기본 간격을 유지한다.
+   */
   private nextDelaySec(base: number, hasMore: boolean): number {
     // 가져갈 것이 남았다고 서버가 알려주면 늦추지 않는다. 늦추면 밀린 건이 더 밀린다
     if (hasMore) return 0;
-    if (this.emptyCount <= 1) return base;
-    return Math.min(base * Math.min(this.emptyCount, 6), MAX_BACKOFF_SEC);
+    for (const [threshold, seconds] of [...BACKOFF_STEPS].reverse()) {
+      if (this.emptyCount >= threshold) return seconds;
+    }
+    return base;
   }
 
   private schedule(seconds: number): void {
