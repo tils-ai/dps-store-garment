@@ -18,6 +18,9 @@ import { fileToDataUrl, makeQrDataUrl, makeThumbnail } from "./work-order-assets
  */
 
 /** 큐가 비었을 때 폴링을 늦추는 상한(초). 서버와 네트워크를 아낀다 */
+/** 내려받기 실패 시 즉시 다시 시도하는 횟수 */
+const FETCH_RETRIES = 1;
+
 /** 빈 응답이 [n]번 이어지면 [초] 간격으로 늦춘다 (파이썬 판과 같은 표) */
 const BACKOFF_STEPS: [number, number][] = [
   [3, 10],
@@ -234,7 +237,9 @@ export class Agent {
     const doGarment = config.garmentEnabled && job.garmentPending;
     const doWorkOrder = config.workOrderEnabled && job.workOrderPending;
     if (!doGarment && !doWorkOrder) {
-      this.log("info", `건너뜀 — 이 단말이 맡은 작업이 없습니다: ${job.orderNumber}`);
+      // 사유를 밝혀야 한다. "건너뜀"만 남으면 토글을 잘못 꺼 둔 것인지, 다른 단말이
+      // 이미 가져간 것인지, 서버가 맡지 않은 갈래를 내려보낸 것인지 구분할 수 없다
+      this.log("info", `건너뜀 (${skipReason(config, job)}): ${job.orderNumber}`);
       return;
     }
 
@@ -599,21 +604,57 @@ export class Agent {
     }
   }
 
-  /** 파일 하나를 내려받아 저장하고 경로를 돌려준다 */
+  /**
+   * 파일 하나를 내려받아 저장하고 경로를 돌려준다.
+   *
+   * 실패하면 **한 번 즉시 다시 시도한다.** 매장 회선이 끊겼다 붙는 일이 잦은데, 그때마다
+   * 다음 폴링(최대 30초)까지 기다리면 작업자가 장비 앞에서 서 있게 된다.
+   */
   private async fetchFile(url: string, dest: string): Promise<string> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60_000);
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const buffer = Buffer.from(await res.arrayBuffer());
-      if (buffer.length === 0) throw new Error("빈 파일");
-      fs.writeFileSync(dest, buffer);
-      return dest;
-    } finally {
-      clearTimeout(timer);
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60_000);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length === 0) throw new Error("빈 파일");
+        fs.writeFileSync(dest, buffer);
+        return dest;
+      } catch (error) {
+        lastError = error as Error;
+        if (attempt < FETCH_RETRIES) this.log("warn", `내려받기 실패 — 다시 시도합니다: ${lastError.message}`);
+      } finally {
+        clearTimeout(timer);
+      }
     }
+
+    throw lastError ?? new Error("내려받기 실패");
   }
+}
+
+/**
+ * 건너뛴 사유 한 줄.
+ *
+ * 토글을 꺼 둔 것과 다른 단말이 이미 가져간 것은 화면에서 똑같아 보인다. 현장에서
+ * "왜 안 나오냐"를 가르는 것이 이 문장이라 사유를 나눠 적는다.
+ */
+function skipReason(
+  config: { garmentEnabled: boolean; garmentPrinterNames: string[]; workOrderEnabled: boolean; workOrderPrinterName: string },
+  job: GarmentJob
+): string {
+  const garmentOff = !(config.garmentEnabled && config.garmentPrinterNames.length > 0);
+  const workOrderOff = !(config.workOrderEnabled && config.workOrderPrinterName);
+
+  if (job.garmentPending && garmentOff && job.workOrderPending && workOrderOff) {
+    return "양쪽 모두 이 단말이 맡지 않음 — 다른 단말 처리 대기";
+  }
+  if (job.garmentPending && garmentOff && !job.workOrderPending) return "장비 전송을 이 단말이 맡지 않음";
+  if (job.workOrderPending && workOrderOff && !job.garmentPending) return "작업지시서를 이 단말이 맡지 않음";
+  if (!job.garmentPending && !job.workOrderPending) return "이미 다른 단말이 가져감";
+  return `사유 불명 (장비=${job.garmentPending}/지시서=${job.workOrderPending})`;
 }
 
 /**
