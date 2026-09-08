@@ -161,3 +161,23 @@ input[type="number"] { width: 110px; min-width: 0; }
 .modal h3 { margin: 0 0 8px; font-size: 16px; }
 .modal p { margin: 0; color: var(--text-sub); line-height: 1.7; font-size: 13px; }
 .row.end { justify-content: flex-end; }
+
+/* 설정 — 등록된 장비 목록 */
+.card h3 { margin: 18px 0 0; font-size: 13px; color: var(--text-muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.chip-empty { font-size: 13px; color: var(--text-muted); }
+.chip-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 5px 6px 5px 12px; font-size: 13px; background: var(--surface);
+}
+.chip-x {
+  border: 0; border-radius: 999px; padding: 0; width: 20px; height: 20px;
+  font-size: 11px; line-height: 1; cursor: pointer;
+  background: transparent; color: var(--text-muted);
+}
+.chip-x:hover { background: var(--danger); color: #fff; }
+/* 경로 입력은 길다. 라벨 아래로 내려 한 줄을 통째로 쓴다 */
+.field.wide { flex-direction: column; align-items: stretch; gap: 6px; }
+.field.wide > span { min-width: 0; }
+.field.wide input { min-width: 0; }
