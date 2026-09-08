@@ -1,6 +1,7 @@
 import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { getConfig } from "./config";
 
 /**
  * 파일 로그.
@@ -41,7 +42,19 @@ const open = (): fs.WriteStream | null => {
   }
 };
 
+/** 낮을수록 덜 중요하다. 설정한 단계보다 낮으면 파일에 남기지 않는다 */
+const RANK = { info: 0, warn: 1, error: 2 } as const;
+
 export function writeLog(level: "info" | "warn" | "error", message: string): void {
+  // 설정을 못 읽어도 로그는 남아야 한다. 읽기 실패는 info 로 본다
+  let threshold: keyof typeof RANK = "info";
+  try {
+    threshold = getConfig().logLevel;
+  } catch {
+    // 설정 파일이 아직 준비되지 않은 초기 실행
+  }
+  if (RANK[level] < RANK[threshold]) return;
+
   const line = `${new Date().toISOString()} [${level.toUpperCase()}] ${message}\n`;
   open()?.write(line);
   // 개발 중에는 콘솔로도 본다
