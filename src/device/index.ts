@@ -51,12 +51,18 @@ export type SendOptions = {
 export type SendResult = { ok: true; pages: number } | { ok: false; reason: string; code?: number };
 
 /** 0.1mm 단위 플레이트 크기. 번호는 벤더가 정한 값이다 */
+/**
+ * 플레이트 실측 크기 (0.1mm).
+ *
+ * 파이썬 판 `config.PLATEN_DIMS` 와 **같은 값이어야 한다.** 배치 좌표를 이 값으로 계산하므로
+ * 어긋나면 도안이 플레이트에서 밀린다. 인치를 반올림하지 말 것.
+ */
 const PLATEN_SIZES: Record<number, { w: number; h: number }> = {
-  0: { w: 4570, h: 4570 }, // 18x18
-  1: { w: 4060, h: 4570 }, // 16x18
-  2: { w: 3550, h: 4060 }, // 14x16
-  3: { w: 2540, h: 3050 }, // 10x12
-  4: { w: 1780, h: 2030 }, // 7x8
+  0: { w: 4064, h: 5334 }, // 16x21
+  1: { w: 4064, h: 4572 }, // 16x18
+  2: { w: 3556, h: 4064 }, // 14x16
+  3: { w: 2540, h: 3048 }, // 10x12
+  4: { w: 1778, h: 2032 }, // 7x8
 };
 
 export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
@@ -94,7 +100,7 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
     const ink = opts.ink ?? opts.settings.ink;
     // 플레이트 교체 대상이면 아동 플레이트로 바꾼다
     const platenSize = opts.needsPlateChange ? opts.settings.platenChild : opts.settings.platenAdult;
-    const platen = PLATEN_SIZES[platenSize] ?? PLATEN_SIZES[2];
+    const platen = PLATEN_SIZES[platenSize] ?? PLATEN_SIZES[0];
     const model = preferredModel(opts.settings.cli, opts.printerName);
     const dataExt = dataExtension(opts.settings.cli, opts.printerName, opts.cliPaths);
 
@@ -107,23 +113,64 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
         targetModel: model || "legacy",
       });
 
-      // 배치 위치 — 자동 맞춤이면 가로 가운데·세로 위쪽, 자동 가운데면 정가운데
+      /*
+        배치와 크기.
+
+        세 갈래이고 순서가 중요하다 (파이썬 판 `_print_via_cli` 와 같다).
+
+        1. 자동 맞춤(크기 수동 지정이 없을 때) — 플레이트에 들어가도록 **줄이기만** 하고
+           (원본이 작으면 그대로) 가로 가운데·세로 위쪽에 놓는다. 이때는 배율(-R)이 아니라
+           **0.1mm 절대 크기(-S)** 로 넘긴다. pro 계열은 DPI 없는 PNG + -R 조합에서 기본 DPI
+           해석이 달라져 출력 크기가 튄다
+        2. 크기 수동 지정 — 그 값을 그대로 쓰고, 자동 가운데면 가운데 배치
+        3. 그 외 — 배율(있으면)로 환산한 크기로 자동 가운데 배치
+      */
       const dims = dimsInMm10(page.width, page.height, page.dpi ?? opts.renderDpi);
-      const size = parseSize(opts.settings.size, dims.w, dims.h);
+      const manualSize = opts.settings.size;
+      const pad4 = (v: number): string => String(Math.max(0, Math.min(9999, v))).padStart(4, "0");
+
+      let sizeArg = "";
+      let magArg = "";
       let position = opts.settings.position;
-      if (opts.settings.autoFit) {
-        position = fitPosition(size.w, platen.w);
-      } else if (opts.settings.autoCenter) {
-        position = centerPosition(size.w, size.h, platen.w, platen.h);
+      let effW = dims.w;
+      let effH = dims.h;
+
+      if (opts.settings.autoFit && !manualSize) {
+        const scale = Math.min(platen.w / Math.max(1, dims.w), platen.h / Math.max(1, dims.h), 1);
+        effW = Math.round(dims.w * scale);
+        effH = Math.round(dims.h * scale);
+        sizeArg = `${pad4(effW)}${pad4(effH)}`;
+        position = fitPosition(effW, platen.w);
+      } else if (manualSize) {
+        sizeArg = manualSize;
+        const parsed = parseSize(manualSize, dims.w, dims.h);
+        effW = parsed.w;
+        effH = parsed.h;
+        if (opts.settings.autoCenter) position = centerPosition(effW, effH, platen.w, platen.h);
+      } else {
+        magArg = opts.settings.magnification || "";
+        if (magArg) {
+          const mag = Number(magArg) / 1000;
+          effW = Math.round(dims.w * mag);
+          effH = Math.round(dims.h * mag);
+        }
+        if (opts.settings.autoCenter) position = centerPosition(effW, effH, platen.w, platen.h);
       }
+
+      // 출력물이 어긋났을 때 무엇을 계산했는지가 이 줄에만 남는다
+      log(
+        "info",
+        `배치 — ${opts.needsPlateChange ? "아동" : "성인"} 플레이트 ${platen.w}x${platen.h}, ` +
+          `이미지 ${effW}x${effH} (0.1mm), 위치 ${position}, size=${sizeArg || "-"}, mag=${magArg || "-"}`
+      );
 
       const dataPath = path.join(workDir, `print_${i + 1}${dataExt}`);
 
       // 인쇄 데이터 생성 — 여기서 계열이 확정된다
       const args = ["print", "-X", xmlPath, "-I", page.filePath, "-A", dataPath, "-L", position];
       // -S 와 -R 은 동시에 못 준다. 하나는 반드시 있어야 한다
-      if (opts.settings.size) args.push("-S", opts.settings.size);
-      else if (opts.settings.magnification) args.push("-R", opts.settings.magnification);
+      if (sizeArg) args.push("-S", sizeArg);
+      else if (magArg) args.push("-R", magArg);
       if (opts.settings.whiteAs !== undefined) args.push("-W", String(opts.settings.whiteAs));
 
       const created = await runWithProbe(ctx, args);
