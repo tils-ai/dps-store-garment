@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { Agent } from "./agent";
-import { DeviceStatusPoller, deviceContext, disposeConverter } from "./device";
+import { DeviceStatusPoller, deviceContext } from "./device";
 import { collectDeviceLog, runMaintenance, type MaintenanceCommand } from "./device/maintenance";
 import { pollAuth, requestAuth } from "./api";
 import { cliStatePath, configPath, diagnosticsDir, getConfig, primaryPrinter, setConfig, vendorDir } from "./config";
@@ -254,5 +254,4 @@ export function teardownIpc(): void {
   agent?.stop();
   agent = null;
   window = null;
-  disposeConverter();
 }
