@@ -4,6 +4,7 @@ import path from "node:path";
 import { buildPrintXml } from "./build-xml";
 import { dataExtension, preferredModel, runOnActive, runWithProbe, setCliStatePath, type CliContext } from "./cli";
 import { centerPosition, convertDesign, dimsInMm10, fitPosition, parseSize } from "./convert";
+import { printImageFiles } from "../printer";
 import { extractPrintData } from "./extract";
 import type { PrintSettings } from "./print-settings";
 
@@ -39,6 +40,11 @@ export type SendOptions = {
   renderDpi: number;
   /** 보낸 인쇄 데이터를 되풀어 진단 폴더에 남길지 */
   extractDiagnostic?: boolean;
+  /**
+   * 전송 방식. `cli` 가 기본이고, `direct` 는 변환한 이미지를 프린터로 그대로 인쇄한다.
+   * 벤더 자산이 없거나 CLI 가 듣지 않을 때의 물러설 자리다.
+   */
+  mode?: "cli" | "direct";
   onLog?: (level: "info" | "warn" | "error", message: string) => void;
 };
 
@@ -71,6 +77,19 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
   try {
     const pages = await convertDesign(opts.designPath, workDir, opts.renderDpi);
     if (pages.length === 0) return { ok: false, reason: "변환된 이미지가 없습니다." };
+
+    // 직접 인쇄는 벤더 CLI 를 거치지 않는다. 장비 설정을 실을 수 없어 장비 패널 값을 따른다
+    if (opts.mode === "direct") {
+      for (let copy = 1; copy <= Math.max(1, opts.quantity); copy++) {
+        const printed = await printImageFiles(
+          pages.map((page) => page.filePath),
+          opts.printerName
+        );
+        if (!printed.ok) return { ok: false, reason: `직접 인쇄 실패: ${printed.reason}` };
+        log("info", `직접 인쇄 ${copy}/${opts.quantity}`);
+      }
+      return { ok: true, pages: pages.length };
+    }
 
     const ink = opts.ink ?? opts.settings.ink;
     // 플레이트 교체 대상이면 아동 플레이트로 바꾼다
