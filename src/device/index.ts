@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { buildPrintXml } from "./build-xml";
 import { dataExtension, preferredModel, runOnActive, runWithProbe, setCliStatePath, type CliContext } from "./cli";
-import { centerPosition, convertDesign, dimsInMm10, fitPosition, parseSize } from "./convert";
+import { centerPosition, dimsInMm10, fitPosition, parseSize, readDesignImage } from "./design-file";
 import { printImageFiles } from "../printer";
 import { extractPrintData } from "./extract";
 import type { PrintSettings } from "./print-settings";
@@ -48,7 +48,7 @@ export type SendOptions = {
   onLog?: (level: "info" | "warn" | "error", message: string) => void;
 };
 
-export type SendResult = { ok: true; pages: number } | { ok: false; reason: string; code?: number };
+export type SendResult = { ok: true } | { ok: false; reason: string; code?: number };
 
 /** 0.1mm 단위 플레이트 크기. 번호는 벤더가 정한 값이다 */
 /**
@@ -81,20 +81,17 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
   const workDir = fs.mkdtempSync(path.join(opts.workDir || os.tmpdir(), "garment-"));
 
   try {
-    const pages = await convertDesign(opts.designPath, workDir, opts.renderDpi);
-    if (pages.length === 0) return { ok: false, reason: "변환된 이미지가 없습니다." };
+    // 받은 PNG 를 그대로 쓴다. 변환도 보정도 하지 않는다 (design-file.ts 설명 참조)
+    const design = readDesignImage(opts.designPath);
 
     // 직접 인쇄는 벤더 CLI 를 거치지 않는다. 장비 설정을 실을 수 없어 장비 패널 값을 따른다
     if (opts.mode === "direct") {
       for (let copy = 1; copy <= Math.max(1, opts.quantity); copy++) {
-        const printed = await printImageFiles(
-          pages.map((page) => page.filePath),
-          opts.printerName
-        );
+        const printed = await printImageFiles([design.filePath], opts.printerName);
         if (!printed.ok) return { ok: false, reason: `직접 인쇄 실패: ${printed.reason}` };
         log("info", `직접 인쇄 ${copy}/${opts.quantity}`);
       }
-      return { ok: true, pages: pages.length };
+      return { ok: true };
     }
 
     const ink = opts.ink ?? opts.settings.ink;
@@ -104,16 +101,13 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
     const model = preferredModel(opts.settings.cli, opts.printerName);
     const dataExt = dataExtension(opts.settings.cli, opts.printerName, opts.cliPaths);
 
-    for (const [i, page] of pages.entries()) {
-      const label = pages.length > 1 ? `${i + 1}/${pages.length}면` : "";
+    const xmlPath = buildPrintXml(path.join(workDir, "print.xml"), opts.settings, {
+      ink,
+      platenSize,
+      targetModel: model || "legacy",
+    });
 
-      const xmlPath = buildPrintXml(path.join(workDir, `print_${i + 1}.xml`), opts.settings, {
-        ink,
-        platenSize,
-        targetModel: model || "legacy",
-      });
-
-      /*
+    /*
         배치와 크기.
 
         세 갈래이고 순서가 중요하다 (파이썬 판 `_print_via_cli` 와 같다).
@@ -125,80 +119,87 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
         2. 크기 수동 지정 — 그 값을 그대로 쓰고, 자동 가운데면 가운데 배치
         3. 그 외 — 배율(있으면)로 환산한 크기로 자동 가운데 배치
       */
-      const dims = dimsInMm10(page.width, page.height, page.dpi ?? opts.renderDpi);
-      const manualSize = opts.settings.size;
-      const pad4 = (v: number): string => String(Math.max(0, Math.min(9999, v))).padStart(4, "0");
+    const dims = dimsInMm10(design.width, design.height, design.dpi ?? opts.renderDpi);
+    const manualSize = opts.settings.size;
+    const pad4 = (v: number): string => String(Math.max(0, Math.min(9999, v))).padStart(4, "0");
 
-      let sizeArg = "";
-      let magArg = "";
-      let position = opts.settings.position;
-      let effW = dims.w;
-      let effH = dims.h;
+    let sizeArg = "";
+    let magArg = "";
+    let position = opts.settings.position;
+    let effW = dims.w;
+    let effH = dims.h;
 
-      if (opts.settings.autoFit && !manualSize) {
-        const scale = Math.min(platen.w / Math.max(1, dims.w), platen.h / Math.max(1, dims.h), 1);
-        effW = Math.round(dims.w * scale);
-        effH = Math.round(dims.h * scale);
-        sizeArg = `${pad4(effW)}${pad4(effH)}`;
-        position = fitPosition(effW, platen.w);
-      } else if (manualSize) {
-        sizeArg = manualSize;
-        const parsed = parseSize(manualSize, dims.w, dims.h);
-        effW = parsed.w;
-        effH = parsed.h;
-        if (opts.settings.autoCenter) position = centerPosition(effW, effH, platen.w, platen.h);
-      } else {
-        magArg = opts.settings.magnification || "";
-        if (magArg) {
-          const mag = Number(magArg) / 1000;
-          effW = Math.round(dims.w * mag);
-          effH = Math.round(dims.h * mag);
-        }
-        if (opts.settings.autoCenter) position = centerPosition(effW, effH, platen.w, platen.h);
+    if (opts.settings.autoFit && !manualSize) {
+      const scale = Math.min(platen.w / Math.max(1, dims.w), platen.h / Math.max(1, dims.h), 1);
+      effW = Math.round(dims.w * scale);
+      effH = Math.round(dims.h * scale);
+      sizeArg = `${pad4(effW)}${pad4(effH)}`;
+      position = fitPosition(effW, platen.w);
+    } else if (manualSize) {
+      sizeArg = manualSize;
+      const parsed = parseSize(manualSize, dims.w, dims.h);
+      effW = parsed.w;
+      effH = parsed.h;
+      if (opts.settings.autoCenter) position = centerPosition(effW, effH, platen.w, platen.h);
+    } else {
+      magArg = opts.settings.magnification || "";
+      if (magArg) {
+        const mag = Number(magArg) / 1000;
+        effW = Math.round(dims.w * mag);
+        effH = Math.round(dims.h * mag);
       }
-
-      // 출력물이 어긋났을 때 무엇을 계산했는지가 이 줄에만 남는다
-      log(
-        "info",
-        `배치 — ${opts.needsPlateChange ? "아동" : "성인"} 플레이트 ${platen.w}x${platen.h}, ` +
-          `이미지 ${effW}x${effH} (0.1mm), 위치 ${position}, size=${sizeArg || "-"}, mag=${magArg || "-"}`
-      );
-
-      const dataPath = path.join(workDir, `print_${i + 1}${dataExt}`);
-
-      // 인쇄 데이터 생성 — 여기서 계열이 확정된다
-      const args = ["print", "-X", xmlPath, "-I", page.filePath, "-A", dataPath, "-L", position];
-      // -S 와 -R 은 동시에 못 준다. 하나는 반드시 있어야 한다
-      if (sizeArg) args.push("-S", sizeArg);
-      else if (magArg) args.push("-R", magArg);
-      if (opts.settings.whiteAs !== undefined) args.push("-W", String(opts.settings.whiteAs));
-
-      const created = await runWithProbe(ctx, args);
-      if (created.code !== 0) {
-        return { ok: false, reason: `인쇄 데이터 생성 실패${label ? ` (${label})` : ""}: ${created.description}`, code: created.code };
-      }
-
-      // 무엇을 보냈는지 되풀어 남긴다. 문제를 쫓을 때만 켠다
-      if (opts.extractDiagnostic) {
-        const extracted = await extractPrintData(ctx, dataPath, opts.diagnosticsDir, i + 1);
-        log(extracted.ok ? "info" : "warn", extracted.ok ? "인쇄 데이터 진단 저장" : extracted.reason!);
-      }
-
-      // 수량만큼 반복 전송한다. 장비가 매수를 스스로 늘리지 않는다
-      for (let copy = 1; copy <= Math.max(1, opts.quantity); copy++) {
-        const sendArgs = ["send", "-A", dataPath, "-P", opts.printerName];
-        // 인쇄 후 작업 삭제(-D)는 pro 전용이다. legacy 에 주면 -3301 로 실패한다
-        if (dataExt === ".arxp") sendArgs.push("-D", opts.settings.autoDelete ? "1" : "0");
-
-        const sent = await runOnActive(ctx, sendArgs);
-        if (sent.code !== 0) {
-          return { ok: false, reason: `장비 전송 실패${label ? ` (${label})` : ""}: ${sent.description}`, code: sent.code };
-        }
-        log("info", `장비 전송 ${copy}/${opts.quantity}${label ? ` · ${label}` : ""}`);
-      }
+      if (opts.settings.autoCenter) position = centerPosition(effW, effH, platen.w, platen.h);
     }
 
-    return { ok: true, pages: pages.length };
+    // 출력물이 어긋났을 때 무엇을 계산했는지가 이 줄에만 남는다
+    log(
+      "info",
+      `배치 — ${opts.needsPlateChange ? "아동" : "성인"} 플레이트 ${platen.w}x${platen.h}, ` +
+        `이미지 ${effW}x${effH} (0.1mm), 위치 ${position}, size=${sizeArg || "-"}, mag=${magArg || "-"}`,
+    );
+
+    const dataPath = path.join(workDir, `print${dataExt}`);
+
+    // 인쇄 데이터 생성 — 여기서 계열이 확정된다
+    const args = ["print", "-X", xmlPath, "-I", design.filePath, "-A", dataPath, "-L", position];
+    // -S 와 -R 은 동시에 못 준다. 하나는 반드시 있어야 한다
+    if (sizeArg) args.push("-S", sizeArg);
+    else if (magArg) args.push("-R", magArg);
+    if (opts.settings.whiteAs !== undefined) args.push("-W", String(opts.settings.whiteAs));
+
+    const created = await runWithProbe(ctx, args);
+    if (created.code !== 0) {
+      return {
+        ok: false,
+        reason: `인쇄 데이터 생성 실패: ${created.description}`,
+        code: created.code,
+      };
+    }
+
+    // 무엇을 보냈는지 되풀어 남긴다. 문제를 쫓을 때만 켠다
+    if (opts.extractDiagnostic) {
+      const extracted = await extractPrintData(ctx, dataPath, opts.diagnosticsDir, 1);
+      log(extracted.ok ? "info" : "warn", extracted.ok ? "인쇄 데이터 진단 저장" : extracted.reason!);
+    }
+
+    // 수량만큼 반복 전송한다. 장비가 매수를 스스로 늘리지 않는다
+    for (let copy = 1; copy <= Math.max(1, opts.quantity); copy++) {
+      const sendArgs = ["send", "-A", dataPath, "-P", opts.printerName];
+      // 인쇄 후 작업 삭제(-D)는 pro 전용이다. legacy 에 주면 -3301 로 실패한다
+      if (dataExt === ".arxp") sendArgs.push("-D", opts.settings.autoDelete ? "1" : "0");
+
+      const sent = await runOnActive(ctx, sendArgs);
+      if (sent.code !== 0) {
+        return {
+          ok: false,
+          reason: `장비 전송 실패: ${sent.description}`,
+          code: sent.code,
+        };
+      }
+      log("info", `장비 전송 ${copy}/${opts.quantity}`);
+    }
+
+    return { ok: true };
   } catch (error) {
     return { ok: false, reason: (error as Error).message };
   } finally {
@@ -211,7 +212,6 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
   }
 }
 
-export { disposeConverter } from "./convert";
 export { DEFAULT_PRINT_SETTINGS, INK_COLOR_ONLY, INK_WHITE_AND_COLOR, type PrintSettings } from "./print-settings";
 export { RETURN_CODES } from "./cli";
 export { DeviceStatusPoller, readDeviceStatus, type DeviceStatus, type DeviceState } from "./status";
