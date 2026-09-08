@@ -5,7 +5,7 @@ import { Agent } from "./agent";
 import { DeviceStatusPoller, deviceContext, disposeConverter } from "./device";
 import { collectDeviceLog, runMaintenance, type MaintenanceCommand } from "./device/maintenance";
 import { pollAuth, requestAuth } from "./api";
-import { cliStatePath, configPath, diagnosticsDir, getConfig, setConfig, vendorDir } from "./config";
+import { cliStatePath, configPath, diagnosticsDir, getConfig, primaryPrinter, setConfig, vendorDir } from "./config";
 import { writeLog } from "./logger";
 import { IncomingWatcher } from "./watcher";
 import type { AppConfig } from "./config";
@@ -42,7 +42,18 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   });
 
   // 장비 상태는 전송 중에도 읽혀야 해서 폴링 루프와 따로 돈다
-  statusPoller = new DeviceStatusPoller(currentDeviceContext, (status) => send("device:status", status));
+  statusPoller = new DeviceStatusPoller(
+    // 조회를 꺼 두면 맥락을 주지 않는다. 조회 자체가 CLI 호출이라 전송과 겹치면 장비가 바쁘다
+    () => (getConfig().deviceStatusEnabled ? currentDeviceContext() : null),
+    (status) => send("device:status", status),
+    () => getConfig().deviceStatusIntervalSec * 1000,
+    (status) => {
+      const detail = status.errors.length > 0 ? status.errors.join("; ") : "출력 정지";
+      const message = `장비 오류: ${detail}${status.currentFile ? ` (${status.currentFile})` : ""}`;
+      writeLog("error", message);
+      send("log", { level: "error", message, at: Date.now() });
+    }
+  );
   statusPoller.start();
 
   // 감시 폴더 — 서버 큐와 별개로 떨궈진 파일도 집는다
@@ -204,17 +215,23 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   });
 }
 
-/** 장비 명령에 쓸 실행 맥락. 장비 전송이 꺼져 있거나 장비가 없으면 null */
+/**
+ * 장비 명령에 쓸 실행 맥락.
+ *
+ * 여러 대를 물려도 상태 조회와 관리 명령은 대표 장비 한 대에만 보낸다. 전 대에 돌리면
+ * 조회가 겹쳐 장비가 바쁘고, 어느 대의 답인지도 화면에서 갈리지 않는다.
+ */
 function currentDeviceContext() {
   const config = getConfig();
-  if (!config.garmentEnabled || !config.garmentPrinterName) return null;
+  const printerName = primaryPrinter(config);
+  if (!config.garmentEnabled || !printerName) return null;
   return deviceContext({
     cliPaths: {
       legacy: config.cliLegacyPath || path.join(vendorDir(), "cli_legacy.exe"),
       pro: config.cliProPath || path.join(vendorDir(), "cli_pro.exe"),
     },
     setting: config.print.cli,
-    printerName: config.garmentPrinterName,
+    printerName,
     diagnosticsDir: diagnosticsDir(),
     cliStatePath: cliStatePath(),
     onLog: writeLog,
