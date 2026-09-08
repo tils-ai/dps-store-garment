@@ -35,65 +35,187 @@ async function loadConfig() {
   $("watch-enabled").checked = config.watchEnabled;
   $("tenant").value = config.tenant || "";
 
-  const p = config.print;
-  $("p-cli").value = p.cli;
-  $("p-ink").value = String(p.ink);
-  $("p-resolution").value = p.resolution;
-  $("p-platen-adult").value = p.platenAdult;
-  $("p-platen-child").value = p.platenChild;
-  $("p-magnification").value = p.magnification;
+  $("garment-dispatch").value = config.garmentDispatch;
+  $("garment-mode").value = config.garmentMode;
+  $("poll-interval").value = config.pollIntervalSec;
+  $("device-status-enabled").checked = config.deviceStatusEnabled;
+  $("device-status-interval").value = config.deviceStatusIntervalSec;
+  $("incoming-dir").value = config.incomingDir;
+  $("done-dir").value = config.doneDir;
+  $("error-dir").value = config.errorDir;
+  $("download-dir").value = config.downloadDir;
+  $("log-level").value = config.logLevel;
   $("p-render-dpi").value = config.renderDpi;
-  $("p-auto-fit").checked = p.autoFit;
-  $("p-auto-center").checked = p.autoCenter;
-  $("p-auto-delete").checked = p.autoDelete;
   $("extract-diagnostic").checked = config.extractDiagnostic;
 
+  // 장비 설정은 이름만 다를 뿐 전부 config.print 의 값이다. 하나씩 적지 않고 표로 돈다
+  for (const [id, key] of Object.entries(PRINT_FIELDS)) {
+    const el = $(id);
+    const value = config.print[key];
+    if (el.type === "checkbox") el.checked = Boolean(value);
+    else el.value = String(value);
+  }
+
+  renderPrinterChips();
   await loadPrinters();
+}
+
+/** 화면 입력칸 ↔ 장비 설정 키. 값 종류는 입력칸 type 으로 가른다 */
+const PRINT_FIELDS = {
+  "p-cli": "cli",
+  "p-ink": "ink",
+  "p-resolution": "resolution",
+  "p-platen-adult": "platenAdult",
+  "p-platen-child": "platenChild",
+  "p-platen-size": "platenSize",
+  "p-copies": "copies",
+  "p-magnification": "magnification",
+  "p-size": "size",
+  "p-position": "position",
+  "p-machine-mode": "machineMode",
+  "p-auto-fit": "autoFit",
+  "p-auto-center": "autoCenter",
+  "p-auto-delete": "autoDelete",
+  "p-ink-volume": "inkVolume",
+  "p-highlight": "highlight",
+  "p-mask": "mask",
+  "p-double-print": "doublePrint",
+  "p-min-white": "minWhite",
+  "p-choke": "choke",
+  "p-white-as": "whiteAs",
+  "p-eco-mode": "ecoMode",
+  "p-material-black": "materialBlack",
+  "p-uni-print": "uniPrint",
+  "p-multiple": "multiple",
+  "p-pause": "pause",
+  "p-trans-color": "transColor",
+  "p-color-trans": "colorTrans",
+  "p-tolerance": "tolerance",
+  "p-saturation": "saturation",
+  "p-brightness": "brightness",
+  "p-contrast": "contrast",
+  "p-cyan-balance": "cyanBalance",
+  "p-magenta-balance": "magentaBalance",
+  "p-yellow-balance": "yellowBalance",
+  "p-black-balance": "blackBalance",
+};
+
+/** 등록된 장비 목록. × 로 한 대씩 뺀다 */
+function renderPrinterChips() {
+  const box = $("garment-chips");
+  box.innerHTML = "";
+  if (config.garmentPrinterNames.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "chip-empty";
+    empty.textContent = "등록된 장비 없음 (기본 프린터로 보냅니다)";
+    box.appendChild(empty);
+    return;
+  }
+  for (const [i, name] of config.garmentPrinterNames.entries()) {
+    const chip = document.createElement("span");
+    chip.className = "chip-item";
+    // 첫 대가 상태 조회와 관리 명령을 받는다. 화면에서도 구분이 돼야 한다
+    chip.textContent = i === 0 ? `${name} (대표)` : name;
+    const remove = document.createElement("button");
+    remove.className = "chip-x";
+    remove.textContent = "✕";
+    remove.title = "목록에서 빼기";
+    remove.addEventListener("click", async () => {
+      await save({ garmentPrinterNames: config.garmentPrinterNames.filter((n) => n !== name) });
+      renderPrinterChips();
+    });
+    chip.appendChild(remove);
+    box.appendChild(chip);
+  }
 }
 
 async function loadPrinters() {
   const printers = await api.printers.list();
-  for (const [id, saved] of [
-    ["garment-printer", config.garmentPrinterName],
-    ["work-order-printer", config.workOrderPrinterName],
-  ]) {
-    const select = $(id);
-    select.innerHTML = "";
-    const none = document.createElement("option");
-    none.value = "";
-    none.textContent = printers.length ? "기본 프린터" : "프린터를 찾지 못했습니다";
-    select.appendChild(none);
-    for (const pr of printers) {
+
+  // 장비는 목록에 더하는 용도라 고르는 칸을 비워 둔다
+  const garment = $("garment-printer");
+  garment.innerHTML = "";
+  const pick = document.createElement("option");
+  pick.value = "";
+  pick.textContent = printers.length ? "장비 선택..." : "프린터를 찾지 못했습니다";
+  garment.appendChild(pick);
+
+  const workOrder = $("work-order-printer");
+  workOrder.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = printers.length ? "기본 프린터" : "프린터를 찾지 못했습니다";
+  workOrder.appendChild(none);
+
+  for (const pr of printers) {
+    for (const select of [garment, workOrder]) {
       const opt = document.createElement("option");
       opt.value = pr.name;
       opt.textContent = pr.displayName || pr.name;
       select.appendChild(opt);
     }
-    select.value = saved || "";
   }
+  workOrder.value = config.workOrderPrinterName || "";
 }
 
 const save = async (patch) => (config = await api.config.set(patch));
 const savePrint = async (patch) => (config = await api.config.set({ print: { ...config.print, ...patch } }));
 
+/** 숫자 칸이 비면 0 이 아니라 기존 값을 지킨다. 빈 칸으로 설정이 초기화되면 안 된다 */
+const asNumber = (raw, fallback) => {
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : fallback;
+};
+
 $("garment-enabled").addEventListener("change", (e) => save({ garmentEnabled: e.target.checked }));
 $("work-order-enabled").addEventListener("change", (e) => save({ workOrderEnabled: e.target.checked }));
 $("auto-send").addEventListener("change", (e) => save({ autoSend: e.target.checked }));
 $("watch-enabled").addEventListener("change", (e) => save({ watchEnabled: e.target.checked }));
-$("garment-printer").addEventListener("change", (e) => save({ garmentPrinterName: e.target.value }));
 $("work-order-printer").addEventListener("change", (e) => save({ workOrderPrinterName: e.target.value }));
-$("p-render-dpi").addEventListener("change", (e) => save({ renderDpi: Number(e.target.value) || 300 }));
-
-$("p-cli").addEventListener("change", (e) => savePrint({ cli: e.target.value }));
-$("p-ink").addEventListener("change", (e) => savePrint({ ink: Number(e.target.value) }));
-$("p-resolution").addEventListener("change", (e) => savePrint({ resolution: Number(e.target.value) }));
-$("p-platen-adult").addEventListener("change", (e) => savePrint({ platenAdult: Number(e.target.value) }));
-$("p-platen-child").addEventListener("change", (e) => savePrint({ platenChild: Number(e.target.value) }));
-$("p-magnification").addEventListener("change", (e) => savePrint({ magnification: e.target.value.trim() }));
-$("p-auto-fit").addEventListener("change", (e) => savePrint({ autoFit: e.target.checked }));
-$("p-auto-center").addEventListener("change", (e) => savePrint({ autoCenter: e.target.checked }));
-$("p-auto-delete").addEventListener("change", (e) => savePrint({ autoDelete: e.target.checked }));
+$("garment-dispatch").addEventListener("change", (e) => save({ garmentDispatch: e.target.value }));
+$("garment-mode").addEventListener("change", (e) => save({ garmentMode: e.target.value }));
+$("poll-interval").addEventListener("change", (e) => save({ pollIntervalSec: asNumber(e.target.value, config.pollIntervalSec) }));
+$("device-status-enabled").addEventListener("change", (e) => save({ deviceStatusEnabled: e.target.checked }));
+$("device-status-interval").addEventListener("change", (e) =>
+  save({ deviceStatusIntervalSec: asNumber(e.target.value, config.deviceStatusIntervalSec) })
+);
+$("incoming-dir").addEventListener("change", (e) => save({ incomingDir: e.target.value.trim() }));
+$("done-dir").addEventListener("change", (e) => save({ doneDir: e.target.value.trim() }));
+$("error-dir").addEventListener("change", (e) => save({ errorDir: e.target.value.trim() }));
+$("log-level").addEventListener("change", (e) => save({ logLevel: e.target.value }));
+$("download-dir").addEventListener("change", (e) => save({ downloadDir: e.target.value.trim() }));
+$("p-render-dpi").addEventListener("change", (e) => save({ renderDpi: asNumber(e.target.value, config.renderDpi) }));
 $("extract-diagnostic").addEventListener("change", (e) => save({ extractDiagnostic: e.target.checked }));
+
+$("garment-add").addEventListener("click", async () => {
+  const name = $("garment-printer").value;
+  // 같은 장비를 두 번 넣으면 라운드로빈이 그 대에만 몰린다
+  if (!name || config.garmentPrinterNames.includes(name)) return;
+  await save({ garmentPrinterNames: [...config.garmentPrinterNames, name] });
+  $("garment-printer").value = "";
+  renderPrinterChips();
+});
+
+/** 값이 숫자인 선택 칸. select 는 문자열을 돌려주므로 따로 가른다 */
+const NUMBER_SELECTS = new Set(["p-ink"]);
+
+for (const [id, key] of Object.entries(PRINT_FIELDS)) {
+  const el = $(id);
+  el.addEventListener("change", (e) => {
+    if (el.type === "checkbox") return savePrint({ [key]: e.target.checked });
+    if (el.type === "number" || NUMBER_SELECTS.has(id)) {
+      return savePrint({ [key]: asNumber(e.target.value, config.print[key]) });
+    }
+    return savePrint({ [key]: e.target.value.trim() });
+  });
+}
+
+$("advanced-toggle").addEventListener("click", () => {
+  const box = $("advanced");
+  box.hidden = !box.hidden;
+  $("advanced-toggle").textContent = box.hidden ? "고급 설정 펼치기" : "고급 설정 접기";
+  $("advanced-toggle").setAttribute("aria-expanded", String(!box.hidden));
+});
 
 for (const btn of document.querySelectorAll("[data-open]")) {
   btn.addEventListener("click", () => api.openFolder(btn.dataset.open));
@@ -201,12 +323,19 @@ function renderDevice(status) {
   const el = $("stat-device");
   const stat = el.parentElement;
   if (!status) {
-    // 상태 조회는 LAN 연결 장비에서만 된다. USB 연결이나 꺼진 상태면 여기로 온다
-    el.textContent = "오프라인";
+    // 조회를 꺼 뒀는지, 장비가 안 잡히는지를 구분해 준다. 둘은 대응이 다르다
+    // (상태 조회는 LAN 연결 장비에서만 된다 — USB 연결이나 꺼진 상태면 오프라인)
+    el.textContent = config && !config.deviceStatusEnabled ? "조회 꺼짐" : "오프라인";
     stat.classList.remove("danger");
     return;
   }
-  const detail = status.errors.length ? ` — ${status.errors[0]}` : status.warnings.length ? ` — ${status.warnings[0]}` : "";
+  const detail = status.errors.length
+    ? ` — ${status.errors[0]}`
+    : status.warnings.length
+      ? ` — ${status.warnings[0]}`
+      : status.currentFile
+        ? ` · ${status.currentFile}`
+        : "";
   el.textContent = (DEVICE_LABEL[status.state] ?? status.state) + detail;
   stat.classList.toggle("danger", status.state === "error");
 }

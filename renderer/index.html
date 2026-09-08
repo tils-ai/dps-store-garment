@@ -68,10 +68,44 @@
 
         <div class="card">
           <h2>프린터</h2>
-          <div class="settings">
-            <label class="field"><span>장비</span><select id="garment-printer"></select></label>
-            <label class="field"><span>작업지시서</span><select id="work-order-printer"></select></label>
+          <div class="chips" id="garment-chips"></div>
+          <div class="row">
+            <select id="garment-printer"></select>
+            <button class="secondary" id="garment-add">장비 추가</button>
           </div>
+          <p class="hint">
+            장비를 여러 대 물릴 수 있습니다. 같은 장비에는 한 건씩 차례로 보내고, 장비끼리는 동시에 나갑니다.
+          </p>
+          <div class="settings two">
+            <label class="field"><span>분배 방식</span>
+              <select id="garment-dispatch">
+                <option value="round_robin">번갈아 (round robin)</option>
+                <option value="single">첫 번째 장비만</option>
+              </select>
+            </label>
+            <label class="field"><span>전송 방식</span>
+              <select id="garment-mode">
+                <option value="cli">CLI (인쇄 데이터 생성)</option>
+                <option value="direct">직접 인쇄 (이미지 그대로)</option>
+              </select>
+            </label>
+            <label class="field"><span>작업지시서</span><select id="work-order-printer"></select></label>
+            <label class="field"><span>폴링 간격(초)</span><input type="number" id="poll-interval" min="1" max="60" /></label>
+          </div>
+          <p class="hint">
+            직접 인쇄는 벤더 CLI 를 거치지 않아 잉크·플레이트 설정을 실을 수 없습니다. 장비 패널 설정을 따릅니다.
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>장비 상태</h2>
+          <div class="settings two">
+            <label class="check"><input type="checkbox" id="device-status-enabled" /> 장비 상태를 주기적으로 조회한다</label>
+            <label class="field"><span>조회 간격(초)</span><input type="number" id="device-status-interval" min="1" max="600" /></label>
+          </div>
+          <p class="hint">
+            LAN 으로 연결된 장비에서만 됩니다. 조회 자체가 장비 호출이라 전송과 겹치면 장비가 바쁠 수 있습니다.
+          </p>
         </div>
 
         <div class="card">
@@ -86,6 +120,7 @@
             <label class="field"><span>해상도</span><input type="number" id="p-resolution" min="0" max="3" /></label>
             <label class="field"><span>성인 플레이트</span><input type="number" id="p-platen-adult" min="0" max="4" /></label>
             <label class="field"><span>아동 플레이트</span><input type="number" id="p-platen-child" min="0" max="4" /></label>
+            <label class="field"><span>매수</span><input type="number" id="p-copies" min="1" max="99" /></label>
             <label class="field"><span>배율</span><input type="text" id="p-magnification" placeholder="1000 = 100%" /></label>
             <label class="field"><span>렌더 DPI</span><input type="number" id="p-render-dpi" min="72" max="1200" /></label>
             <label class="check"><input type="checkbox" id="p-auto-fit" /> 플레이트 맞춤</label>
@@ -97,6 +132,55 @@
             전송 후 작업 삭제는 pro 계열에서만 동작합니다. legacy 는 장비 패널 설정을 따릅니다.
             인쇄 데이터를 남기면 무엇을 보냈는지 확인할 수 있지만 건마다 파일 세 개가 쌓입니다.
           </p>
+
+          <div class="row">
+            <button class="secondary" id="advanced-toggle" aria-expanded="false">고급 설정 펼치기</button>
+          </div>
+
+          <!-- 고급 — 파이썬 판 [garment_cli] 전 항목. 기본값을 바꾸면 출력 품질이 달라진다 -->
+          <div id="advanced" hidden>
+            <h3>레이아웃</h3>
+            <div class="settings two">
+              <label class="field"><span>크기 (size)</span><input type="text" id="p-size" placeholder="비우면 배율 사용" /></label>
+              <label class="field"><span>위치 (8자리)</span><input type="text" id="p-position" maxlength="8" /></label>
+              <label class="field"><span>머신 모드</span><input type="number" id="p-machine-mode" /></label>
+              <label class="field"><span>기본 플레이트</span><input type="number" id="p-platen-size" min="0" max="4" /></label>
+            </div>
+
+            <h3>잉크</h3>
+            <div class="settings two">
+              <label class="field"><span>잉크량</span><input type="number" id="p-ink-volume" /></label>
+              <label class="field"><span>하이라이트</span><input type="number" id="p-highlight" /></label>
+              <label class="field"><span>마스크</span><input type="number" id="p-mask" /></label>
+              <label class="field"><span>이중 인쇄</span><input type="number" id="p-double-print" /></label>
+              <label class="field"><span>최소 화이트</span><input type="number" id="p-min-white" /></label>
+              <label class="field"><span>초크</span><input type="number" id="p-choke" /></label>
+              <label class="field"><span>화이트 처리</span><input type="number" id="p-white-as" /></label>
+              <label class="check"><input type="checkbox" id="p-eco-mode" /> 친환경 모드</label>
+              <label class="check"><input type="checkbox" id="p-material-black" /> 원단 검정</label>
+              <label class="check"><input type="checkbox" id="p-uni-print" /> 단방향 인쇄</label>
+              <label class="check"><input type="checkbox" id="p-multiple" /> 다중</label>
+              <label class="check"><input type="checkbox" id="p-pause" /> 일시정지</label>
+            </div>
+
+            <h3>투명색 처리</h3>
+            <div class="settings two">
+              <label class="check"><input type="checkbox" id="p-trans-color" /> 투명색 처리</label>
+              <label class="field"><span>투명색 변환</span><input type="number" id="p-color-trans" /></label>
+              <label class="field"><span>투명색 임계</span><input type="number" id="p-tolerance" /></label>
+            </div>
+
+            <h3>색상 보정</h3>
+            <div class="settings two">
+              <label class="field"><span>채도</span><input type="number" id="p-saturation" /></label>
+              <label class="field"><span>명도</span><input type="number" id="p-brightness" /></label>
+              <label class="field"><span>대비</span><input type="number" id="p-contrast" /></label>
+              <label class="field"><span>시안 균형</span><input type="number" id="p-cyan-balance" /></label>
+              <label class="field"><span>마젠타 균형</span><input type="number" id="p-magenta-balance" /></label>
+              <label class="field"><span>옐로 균형</span><input type="number" id="p-yellow-balance" /></label>
+              <label class="field"><span>블랙 균형</span><input type="number" id="p-black-balance" /></label>
+            </div>
+          </div>
         </div>
 
         <div class="card">
@@ -108,6 +192,12 @@
             서버 큐와 별개로, 다른 시스템이 폴더에 넣어 둔 파일(PDF·PNG·JPG)을 대기 목록에 담습니다.
             집은 파일은 폴더 안 done 으로 옮겨지고, 담지 못한 파일은 error 로 갑니다.
           </p>
+          <div class="settings">
+            <label class="field wide"><span>감시 폴더</span><input type="text" id="incoming-dir" spellcheck="false" /></label>
+            <label class="field wide"><span>완료 폴더</span><input type="text" id="done-dir" spellcheck="false" /></label>
+            <label class="field wide"><span>에러 폴더</span><input type="text" id="error-dir" spellcheck="false" /></label>
+            <label class="field wide"><span>다운로드 폴더</span><input type="text" id="download-dir" spellcheck="false" /></label>
+          </div>
           <div class="row">
             <button class="secondary" data-open="incoming">감시 폴더 열기</button>
           </div>
@@ -128,7 +218,17 @@
         </div>
 
         <div class="card">
-          <h2>폴더</h2>
+          <h2>로그</h2>
+          <div class="settings two">
+            <label class="field"><span>파일 로그 단계</span>
+              <select id="log-level">
+                <option value="info">전부 (info)</option>
+                <option value="warn">경고 이상 (warn)</option>
+                <option value="error">오류만 (error)</option>
+              </select>
+            </label>
+          </div>
+          <p class="hint">화면 로그는 단계와 무관하게 모두 보여줍니다. 이 설정은 파일 로그에만 걸립니다.</p>
           <div class="row">
             <button class="secondary" data-open="download">다운로드 폴더</button>
             <button class="secondary" data-open="logs">로그 폴더</button>
