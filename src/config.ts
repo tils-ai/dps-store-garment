@@ -88,7 +88,12 @@ export type AppConfig = {
   cliLegacyPath: string;
   cliProPath: string;
 
-  /** PDF 를 래스터화할 해상도 */
+  /**
+   * 디자인 PNG 가 해상도를 밝히지 않을 때 쓸 기본값.
+   *
+   * 배치 크기를 픽셀이 아니라 실제 치수(0.1mm)로 계산하므로 해상도가 있어야 한다.
+   * 대개 PNG 안에 들어 있고(pHYs), 없을 때만 이 값을 쓴다.
+   */
   renderDpi: number;
 
   /**
