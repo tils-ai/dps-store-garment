@@ -11,8 +11,13 @@ import path from "node:path";
  * 임시 이름으로 만든 뒤 rename 하므로, **크기가 멈출 때까지 기다린 다음** 넘긴다.
  */
 
-/** 받아들일 확장자. ZIP 은 쓰지 않는다 */
-const ACCEPTED = new Set([".pdf", ".png", ".jpg", ".jpeg"]);
+/**
+ * 받아들일 확장자.
+ *
+ * 장비로 나가는 것은 PNG 뿐이다. 다른 형식을 집어 대기 목록에 올리면 작업자가 전송을
+ * 눌렀을 때에야 실패를 본다. 폴더에서 집을 때 걸러 두는 편이 낫다.
+ */
+const ACCEPTED = new Set([".png"]);
 
 /** 크기 확인 간격(ms)과 몇 번 연속 같아야 안정으로 볼지 */
 const STABLE_INTERVAL_MS = 500;

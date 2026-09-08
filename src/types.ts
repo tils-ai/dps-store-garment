@@ -18,9 +18,9 @@ export type GarmentJob = {
   /**
    * 디자인 파일 주소.
    *
-   * ⚠️ 서버 칼럼 이름이 `designFileUrl` 이고 타입이 `PDF` 라고 적혀 있어도 **실제로는
-   * PNG 일 수 있다.** 출력 파일 종류는 상대 시스템 설정이 정하며 우리는 그 값을 볼 수 없다.
-   * 확장자와 실제 바이트로 판별한다.
+   * 장비로 나가는 것은 **PNG 뿐이다.** 다만 `designFileType` 에 `PDF` 가 적혀 오는 건이
+   * 있는데(디자인을 아직 못 받아 기본값이 남은 행), 그 값은 믿지 않고 내려받은 파일의
+   * 앞머리로 판별한다. PNG 이 아니면 출력하지 않고 실패로 보고한다.
    */
   designFileUrl: string;
   designFileType: string;
