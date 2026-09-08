@@ -585,7 +585,7 @@ export class Agent {
     const config = getConfig();
     return buildWorkOrderHtml({
       job: item.job,
-      // 생산 이미지는 실제로 출력한 도안이다. 이미지가 아닌 형식(PDF 등)이면 칸을 비운다
+      // 생산 이미지는 실제로 출력한 도안(PNG)이다. 읽지 못하면 칸을 비운다
       designImageDataUrl: fileToDataUrl(item.downloadPath),
       thumbnailDataUrls: item.thumbnailPaths.map(fileToDataUrl).filter((v): v is string => v !== null),
       qrDataUrl: await makeQrDataUrl(item.job.workOrder.workUrl),
