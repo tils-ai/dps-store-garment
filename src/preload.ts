@@ -56,7 +56,8 @@ contextBridge.exposeInMainWorld("garment", {
     delete: (jobId: string) => ipcRenderer.invoke("queue:delete", jobId),
   },
 
-  openFolder: (kind: "download" | "incoming" | "logs" | "config") => ipcRenderer.invoke("open:folder", kind),
+  openFolder: (kind: "download" | "incoming" | "error" | "logs" | "config") =>
+    ipcRenderer.invoke("open:folder", kind),
 
   workOrder: {
     /** 작업지시서 인쇄 */

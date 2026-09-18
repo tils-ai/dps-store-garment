@@ -4,6 +4,7 @@ import path from "node:path";
 import { Agent } from "./agent";
 import { DeviceStatusPoller, deviceContext } from "./device";
 import { collectDeviceLog, runMaintenance, type MaintenanceCommand } from "./device/maintenance";
+import { modelFromDriver, rememberDriverModels } from "./device/cli";
 import { pollAuth, requestAuth } from "./api";
 import { cliStatePath, configPath, diagnosticsDir, getConfig, primaryPrinter, setConfig, vendorDir } from "./config";
 import { writeLog } from "./logger";
@@ -175,12 +176,14 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   });
 
   // ── 폴더 열기 ── 문제 확인 때 현장에서 직접 들여다본다
-  ipcMain.handle("open:folder", (_e, kind: "download" | "incoming" | "logs" | "config") => {
+  ipcMain.handle("open:folder", (_e, kind: "download" | "incoming" | "error" | "logs" | "config") => {
     const target =
       kind === "download"
         ? getConfig().downloadDir
         : kind === "incoming"
           ? getConfig().incomingDir
+          : kind === "error"
+          ? getConfig().errorDir
           : kind === "logs"
           ? path.dirname(diagnosticsDir()) // app.log 와 diagnostics 를 함께 본다
           : path.dirname(configPath());
@@ -211,7 +214,21 @@ export function setupIpc(mainWindow: BrowserWindow): void {
   // ── 프린터 목록 ──
   ipcMain.handle("printers:list", async () => {
     const printers = await mainWindow.webContents.getPrintersAsync();
-    return printers.map((p) => ({ name: p.name, displayName: p.displayName, isDefault: p.isDefault }));
+    // 드라이버 모델(printer-make-and-model)로 가먼트 장비를 가린다. 프린터 이름은
+    // 매장에서 바꿔 쓰므로 이름만 보면 엉뚱한 장비가 등록돼도 알 수 없다
+    const list = printers.map((p) => {
+      // Options 타입에 인덱스 시그니처가 없어 캐스팅한다. 없는 드라이버는 빈 문자열
+      const driver = String((p.options as Record<string, unknown> | undefined)?.["printer-make-and-model"] ?? "");
+      return {
+        name: p.name,
+        displayName: p.displayName,
+        driver,
+        garmentModel: modelFromDriver(driver),
+        isDefault: p.isDefault,
+      };
+    });
+    rememberDriverModels(list.map((p) => ({ name: p.name, model: p.garmentModel })));
+    return list;
   });
 }
 

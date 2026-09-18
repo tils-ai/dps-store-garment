@@ -128,9 +128,32 @@ const clearActiveExe = (): void => {
  */
 export function preferredModel(setting: "auto" | CliModel, printerName: string): CliModel | "" {
   if (setting === "pro" || setting === "legacy") return setting;
+  // 드라이버로 가려낸 것이 있으면 그게 우선이다 — 프린터 이름은 매장에서 바꿔 쓴다
+  const byDriver = driverModels.get(printerName);
+  if (byDriver) return byDriver;
   const target = (printerName || "").toLowerCase().replace(/[\s-]/g, "");
   if (target.includes("pro")) return "pro";
   return "";
+}
+
+/**
+ * 드라이버 모델 문자열로 가먼트 장비인지, 어느 계열인지 가린다.
+ *
+ * 프린터 이름은 매장에서 바꾼다("1층 프린터"). 드라이버 모델(printer-make-and-model)은
+ * 안 바뀌므로 이쪽이 확실하다. 예: "Brother GTX pro", "Brother GTX-4".
+ */
+export function modelFromDriver(driver: string): CliModel | "" {
+  const target = (driver || "").toLowerCase().replace(/[\s-]/g, "");
+  if (!target.includes("gtx")) return "";
+  return target.includes("pro") ? "pro" : "legacy";
+}
+
+/** 프린터 이름 → 드라이버로 가린 계열. 목록을 읽을 때마다 갱신한다 */
+const driverModels = new Map<string, CliModel>();
+
+export function rememberDriverModels(entries: { name: string; model: CliModel | "" }[]): void {
+  driverModels.clear();
+  for (const { name, model } of entries) if (model) driverModels.set(name, model);
 }
 
 /** 계열에 맞는 인쇄 데이터 확장자. pro 는 다른 포맷을 쓴다 */
