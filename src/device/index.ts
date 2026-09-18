@@ -77,8 +77,11 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
     onLog: opts.onLog,
   };
 
-  // 작업 파일은 임시 폴더에 모은다. 원본은 건드리지 않아 재시도가 가능해야 한다
-  const workDir = fs.mkdtempSync(path.join(opts.workDir || os.tmpdir(), "garment-"));
+  // 작업 파일은 임시 폴더에 모은다. 원본은 건드리지 않아 재시도가 가능해야 한다.
+  // mkdtemp 는 상위 폴더를 만들어 주지 않는다 — 없으면 ENOENT 로 첫 전송부터 막힌다
+  const workBase = opts.workDir || os.tmpdir();
+  fs.mkdirSync(workBase, { recursive: true });
+  const workDir = fs.mkdtempSync(path.join(workBase, "garment-"));
 
   try {
     // 받은 PNG 를 그대로 쓴다. 변환도 보정도 하지 않는다 (design-file.ts 설명 참조)
@@ -174,6 +177,16 @@ export async function sendToDevice(opts: SendOptions): Promise<SendResult> {
         reason: `인쇄 데이터 생성 실패: ${created.description}`,
         code: created.code,
       };
+    }
+
+    // 외부 실행 파일이 종료코드 0 으로 끝나고도 아무것도 안 만드는 일이 있다.
+    // 그러면 다음 send 가 "장비 전송 실패" 로 떨어져 진짜 원인(생성 단계 무동작)을 가린다.
+    //
+    // 여기서 막지는 않는다 — 벤더 CLI 가 이 경로에 곧바로 쓰지 않는 경우를 실물로
+    // 확인하지 못했다. 잘못 막으면 멀쩡한 전송이 통째로 선다. 남겨만 두고 보낸다.
+    const dataSize = fs.existsSync(dataPath) ? fs.statSync(dataPath).size : -1;
+    if (dataSize <= 0) {
+      log("warn", `인쇄 데이터가 보이지 않습니다 (CLI 는 정상 종료). 대상: ${dataPath}`);
     }
 
     // 무엇을 보냈는지 되풀어 남긴다. 문제를 쫓을 때만 켠다
