@@ -19,6 +19,7 @@ let config = null;
 
 async function loadConfig() {
   config = await api.config.get();
+  applyAppearance(config.appearance);
 
   const connected = Boolean(config.apiKey);
   $("auth-card").hidden = connected;
@@ -118,7 +119,7 @@ function renderPrinterChips() {
     chip.textContent = i === 0 ? `${name} (대표)` : name;
     const remove = document.createElement("button");
     remove.className = "chip-x";
-    remove.textContent = "✕";
+    remove.appendChild(icon("x"));
     remove.title = "목록에서 빼기";
     remove.addEventListener("click", async () => {
       await save({ garmentPrinterNames: config.garmentPrinterNames.filter((n) => n !== name) });
@@ -129,37 +130,113 @@ function renderPrinterChips() {
   }
 }
 
+/** 마지막으로 읽은 프린터 목록. 설정 점검과 추가 시 확인에 쓴다 */
+let printerList = [];
+
+const printerOf = (name) => printerList.find((p) => p.name === name) ?? null;
+
 async function loadPrinters() {
-  const printers = await api.printers.list();
+  printerList = await api.printers.list();
 
   // 장비는 목록에 더하는 용도라 고르는 칸을 비워 둔다
   const garment = $("garment-printer");
   garment.innerHTML = "";
   const pick = document.createElement("option");
   pick.value = "";
-  pick.textContent = printers.length ? "장비 선택..." : "프린터를 찾지 못했습니다";
+  pick.textContent = printerList.length ? "장비 선택..." : "프린터를 찾지 못했습니다";
   garment.appendChild(pick);
 
   const workOrder = $("work-order-printer");
   workOrder.innerHTML = "";
   const none = document.createElement("option");
   none.value = "";
-  none.textContent = printers.length ? "기본 프린터" : "프린터를 찾지 못했습니다";
+  none.textContent = printerList.length ? "기본 프린터" : "프린터를 찾지 못했습니다";
   workOrder.appendChild(none);
 
-  for (const pr of printers) {
-    for (const select of [garment, workOrder]) {
+  // 가먼트 칸은 장비를 위로 모으고, 그 외는 드라이버명을 같이 보여 준다.
+  // 고르는 자리에서 가려야 잘못 넣고 나서 알아채는 일이 줄어든다
+  const groups = [
+    { label: "가먼트 장비", items: printerList.filter((p) => p.garmentModel) },
+    { label: "그 외 (가먼트 장비 아님)", items: printerList.filter((p) => !p.garmentModel) },
+  ];
+  for (const group of groups) {
+    if (!group.items.length) continue;
+    const box = document.createElement("optgroup");
+    box.label = group.label;
+    for (const pr of group.items) {
       const opt = document.createElement("option");
       opt.value = pr.name;
-      opt.textContent = pr.displayName || pr.name;
-      select.appendChild(opt);
+      opt.textContent = pr.garmentModel
+        ? `${pr.displayName || pr.name}  (${pr.driver})`
+        : `${pr.displayName || pr.name}  — ${pr.driver || "드라이버 확인 불가"}`;
+      box.appendChild(opt);
     }
+    garment.appendChild(box);
+  }
+
+  for (const pr of printerList) {
+    const opt = document.createElement("option");
+    opt.value = pr.name;
+    opt.textContent = pr.displayName || pr.name;
+    workOrder.appendChild(opt);
   }
   workOrder.value = config.workOrderPrinterName || "";
+  renderNotice();
 }
 
-const save = async (patch) => (config = await api.config.set(patch));
-const savePrint = async (patch) => (config = await api.config.set({ print: { ...config.print, ...patch } }));
+/**
+ * 설정된 장비가 지금도 쓸 수 있는 상태인지 훑어 화면 위에 알린다.
+ *
+ * 엉뚱한 프린터가 등록돼 있으면 출력을 걸어도 장비로 가지 않는다. 실제로 그렇게
+ * 며칠을 보낸 매장이 있었다(2026-09-18 스파오 성수점). 걸기 전에 눈에 띄게 한다.
+ */
+function renderNotice() {
+  const box = $("notice");
+  box.innerHTML = "";
+
+  const problems = [];
+  if (config?.garmentEnabled) {
+    const names = config.garmentPrinterNames ?? [];
+    if (!names.length) problems.push("장비가 한 대도 등록되지 않았습니다. 설정에서 추가하세요.");
+    for (const name of names) {
+      const pr = printerOf(name);
+      if (!pr) problems.push(`「${name}」 프린터를 찾을 수 없습니다. 연결이 끊겼거나 이름이 바뀌었습니다.`);
+      else if (!pr.garmentModel)
+        problems.push(`「${name}」는 가먼트 장비가 아닌 것 같습니다 (드라이버: ${pr.driver || "확인 불가"}). 출력을 걸어도 장비로 가지 않습니다.`);
+    }
+  }
+
+  box.hidden = problems.length === 0;
+  if (!problems.length) return;
+  for (const text of problems) {
+    const row = document.createElement("div");
+    row.className = "notice-row";
+    row.append(icon("triangle-alert"), text);
+    box.appendChild(row);
+  }
+}
+
+let savedTimer = null;
+/** 저장 버튼이 없어 저장된 줄 알 수가 없다. 바뀔 때마다 잠깐 알린다 */
+function flashSaved() {
+  const el = $("saved-toast");
+  el.classList.add("on");
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => el.classList.remove("on"), 1400);
+}
+
+const save = async (patch) => {
+  config = await api.config.set(patch);
+  flashSaved();
+  // 장비 목록·역할이 바뀌면 경고도 다시 봐야 한다
+  renderNotice();
+  return config;
+};
+const savePrint = async (patch) => {
+  config = await api.config.set({ print: { ...config.print, ...patch } });
+  flashSaved();
+  return config;
+};
 
 /** 숫자 칸이 비면 0 이 아니라 기존 값을 지킨다. 빈 칸으로 설정이 초기화되면 안 된다 */
 const asNumber = (raw, fallback) => {
@@ -191,6 +268,21 @@ $("garment-add").addEventListener("click", async () => {
   const name = $("garment-printer").value;
   // 같은 장비를 두 번 넣으면 라운드로빈이 그 대에만 몰린다
   if (!name || config.garmentPrinterNames.includes(name)) return;
+
+  // 드라이버가 가먼트 장비가 아니면 한 번 묻는다. 막지는 않는다 —
+  // 드라이버명이 다른 기종이 나올 수 있어 확실히 틀렸다고 단정할 수 없다
+  const pr = printerOf(name);
+  if (pr && !pr.garmentModel) {
+    const ok = await confirmAsk(
+      "가먼트 장비가 아닌 것 같습니다",
+      `「${name}」의 드라이버는 ${pr.driver || "확인 불가"} 입니다.
+
+가먼트 장비로 등록하면 출력을 걸어도 장비로 가지 않을 수 있습니다. 그래도 추가할까요?`,
+      "추가"
+    );
+    if (!ok) return;
+  }
+
   await save({ garmentPrinterNames: [...config.garmentPrinterNames, name] });
   $("garment-printer").value = "";
   renderPrinterChips();
@@ -254,11 +346,50 @@ function setView(next) {
   view = next;
   const connected = Boolean(config?.apiKey);
   $("queue-view").hidden = next !== "queue" || !connected;
-  $("settings-view").hidden = next !== "settings";
-  $("nav-settings").textContent = next === "settings" ? "출력 대기" : "설정";
 }
 
-$("nav-settings").addEventListener("click", () => setView(view === "settings" ? "queue" : "settings"));
+// ── 화면 밝기 ─────────────────────────────────────────
+// 파이썬 판과 같은 3택. system 은 속성을 떼어 OS 설정(prefers-color-scheme)에 맡긴다.
+const THEME_ORDER = ["system", "light", "dark"];
+const THEME_ICON = { system: "monitor", light: "sun", dark: "moon" };
+const THEME_LABEL = { system: "시스템", light: "라이트", dark: "다크" };
+
+function applyAppearance(value) {
+  const v = THEME_ORDER.includes(value) ? value : "system";
+  if (v === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", v);
+  const btn = $("theme-toggle");
+  btn.replaceChildren(icon(THEME_ICON[v]));
+  btn.title = `화면 밝기: ${THEME_LABEL[v]} — 눌러서 바꾸기`;
+}
+
+$("theme-toggle").addEventListener("click", () => {
+  const now = config?.appearance ?? "system";
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(now) + 1) % THEME_ORDER.length];
+  applyAppearance(next);
+  save({ appearance: next });
+});
+
+// 실패 건은 error 폴더로 간다. 숫자만 보여주면 어디를 봐야 할지 모른다
+$("stat-failed-open").addEventListener("click", () => api.openFolder("error"));
+
+// 설정은 화면을 갈아끼우지 않고 본화면 위에 띄운다 — 뒤에 목록·로그가 그대로 남는다
+const settingsOpen = () => !$("settings-backdrop").hidden;
+
+function setSettingsOpen(open) {
+  $("settings-backdrop").hidden = !open;
+  $("nav-settings").textContent = open ? "닫기" : "설정";
+}
+
+$("nav-settings").addEventListener("click", () => setSettingsOpen(!settingsOpen()));
+$("settings-close").addEventListener("click", () => setSettingsOpen(false));
+// 바깥 어두운 자리를 누르면 닫는다. 안쪽 클릭까지 닫히면 안 되므로 대상이 배경일 때만
+$("settings-backdrop").addEventListener("click", (e) => {
+  if (e.target === $("settings-backdrop")) setSettingsOpen(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && settingsOpen()) setSettingsOpen(false);
+});
 
 // ── 인증 ──────────────────────────────────────────────
 $("auth-start").addEventListener("click", async () => {
@@ -319,9 +450,17 @@ const DEVICE_LABEL = {
   unknown: "알 수 없음",
 };
 
+/** 에러로 "들어간" 순간만 최근 처리에 남기려고 직전 상태를 기억한다 */
+let lastDeviceState = null;
+
 function renderDevice(status) {
   const el = $("stat-device");
   const stat = el.parentElement;
+  const state = status ? status.state : null;
+  if (hydrated && state === "error" && lastDeviceState !== "error") {
+    pushRecent(status.currentFile || "장비", "error", `장비 에러 — ${status.errors.join("; ") || "Error stop"}`);
+  }
+  lastDeviceState = state;
   if (!status) {
     // 조회를 꺼 뒀는지, 장비가 안 잡히는지를 구분해 준다. 둘은 대응이 다르다
     // (상태 조회는 LAN 연결 장비에서만 된다 — USB 연결이나 꺼진 상태면 오프라인)
@@ -396,7 +535,7 @@ function buildCard(item) {
   if (item.status === "ready" || item.status === "failed") {
     const del = document.createElement("button");
     del.className = "del";
-    del.textContent = "✕";
+    del.appendChild(icon("x"));
     del.title = "큐에서 삭제";
     del.addEventListener("click", async () => {
       const ok = await confirmAsk(
@@ -416,7 +555,7 @@ function buildCard(item) {
   } else {
     const box = document.createElement("div");
     box.className = "thumb no-thumb";
-    box.textContent = "🖼";
+    box.appendChild(icon("image", "icon-lg"));
     card.appendChild(box);
   }
 
@@ -432,8 +571,8 @@ function buildCard(item) {
 
   const chips = document.createElement("div");
   chips.className = "chips";
-  if (item.doWorkOrder) chips.appendChild(tag("📄 지시서", "info"));
-  if (job.needsPlateChange) chips.appendChild(tag("👶 플레이트 교체", "warn"));
+  if (item.doWorkOrder) chips.appendChild(tag("지시서", "info", "file-text"));
+  if (job.needsPlateChange) chips.appendChild(tag("플레이트 교체", "warn", "baby"));
   if (job.quantity > 1) chips.appendChild(tag(`×${job.quantity}`));
   if (chips.childElementCount) card.appendChild(chips);
 
@@ -446,25 +585,27 @@ function buildCard(item) {
     card.appendChild(ink);
   }
 
+
   const state = document.createElement("div");
   state.className = "state";
-  if (item.status === "printing") state.textContent = "⟳ 전송 중";
+  if (item.status === "printing") state.append(icon("refresh-cw", "spin"), "전송 중");
   else if (item.status === "failed") {
     state.className = "state err";
-    state.textContent = item.errorReason || "전송 실패 · 다시 시도";
+    state.append(icon("circle-x"), item.errorReason || "전송 실패 · 다시 시도");
   } else if (item.status === "done") {
     state.className = "state ok";
-    state.textContent = "✅ 전송 완료";
+    state.append(icon("circle-check"), "전송 완료");
   }
-  if (state.textContent) card.appendChild(state);
+  if (state.childElementCount || state.textContent) card.appendChild(state);
 
   return card;
 }
 
-const tag = (text, kind = "") => {
+const tag = (text, kind = "", iconName = "") => {
   const el = document.createElement("span");
   el.className = "tag" + (kind ? " " + kind : "");
-  el.textContent = text;
+  if (iconName) el.appendChild(icon(iconName));
+  el.append(text);
   return el;
 };
 
@@ -479,25 +620,106 @@ const inkButton = (label, cls, jobId, ink) => {
   return btn;
 };
 
+/**
+ * 목록 높이를 한 줄 높이로 못박는다 — 항목이 있든 없든, 어느 탭이든 자리가 같다.
+ *
+ * 카드 높이 = 썸네일 + 몸통이고, 썸네일이 정사각이라 그리드 칸 폭이 곧 썸네일 높이다.
+ * 칸 폭은 항목이 하나도 없어도 계산되므로 빈 탭에서도 같은 높이를 낼 수 있다.
+ * 몸통 높이는 카드 종류마다 다르다 — 대기 카드에는 출력 버튼이 있고 완료 카드에는 없다.
+ * 본 것 중 가장 큰 값만 쓴다. 작은 값으로 내리면 탭을 옮길 때마다 높이가 널뛴다.
+ */
+const CARD_BODY_FALLBACK = 175;
+let cardBodyHeight = CARD_BODY_FALLBACK;
+
+function fitQueueToOneRow() {
+  const box = $("queue");
+  const first = box.firstElementChild;
+  const thumb = first?.querySelector(".thumb");
+  if (first && thumb) {
+    const body = Math.round(first.getBoundingClientRect().height - thumb.getBoundingClientRect().height);
+    if (body > cardBodyHeight) cardBodyHeight = body;
+  }
+  const column = parseFloat(getComputedStyle(box).gridTemplateColumns) || 200;
+  box.style.height = `${Math.ceil(column + cardBodyHeight)}px`;
+}
+
+// 창 크기가 바뀌면 칸 폭이 달라져 한 줄 높이도 달라진다
+window.addEventListener("resize", fitQueueToOneRow);
+
 function renderQueue() {
   const box = $("queue");
   box.innerHTML = "";
+  // 비었을 때 띄울 안내가 탭마다 다르다. 문구는 CSS 가 고른다
+  box.dataset.filter = filter;
   for (const item of items.values()) {
     if (groupOf(item) !== filter) continue;
     box.appendChild(buildCard(item));
   }
   renderStats();
+  fitQueueToOneRow();
+}
+
+// ── 최근 처리 ─────────────────────────────────────────
+// 작업자가 "방금 뭐가 나갔나" 를 훑는 자리. 파이썬 판과 같은 5건 링버퍼다.
+// 로그와 달리 건 단위 결과만 남는다 — 폴링·설정 변경 같은 것은 넣지 않는다.
+const RECENT_MAX = 5;
+const RECENT_ICON = { ok: "circle-check", warn: "triangle-alert", error: "circle-x" };
+const recent = [];
+
+/** 첫 목록을 받아 채우는 동안에는 최근 처리에 남기지 않는다 — 껐다 켤 때마다 이력이 되살아난다 */
+let hydrated = false;
+
+const labelOf = (job) => (job.itemTotal > 1 ? `${job.orderNumber} #${job.itemIndex}/${job.itemTotal}` : job.orderNumber);
+
+function pushRecent(label, status, detail) {
+  recent.unshift({ at: new Date(), label, status, detail });
+  if (recent.length > RECENT_MAX) recent.length = RECENT_MAX;
+  renderRecent();
+}
+
+function renderRecent() {
+  const box = $("recent");
+  box.innerHTML = "";
+  for (const it of recent) {
+    const row = document.createElement("div");
+    row.className = it.status === "error" ? "recent-row err" : "recent-row";
+
+    const at = document.createElement("span");
+    at.className = "at";
+    at.textContent = it.at.toTimeString().slice(0, 5);
+
+    const what = document.createElement("span");
+    what.className = "what";
+    what.textContent = it.label;
+    what.title = it.label;
+
+    const tail = document.createElement("span");
+    tail.className = "tail";
+    tail.append(icon(RECENT_ICON[it.status] ?? "circle-check"), it.detail);
+
+    row.append(at, what, tail);
+    box.appendChild(row);
+  }
 }
 
 const upsert = (item) => {
   const prev = items.get(item.job.id);
-  // 썸네일은 한 번 만들어 두고 재사용한다. 매번 다시 읽으면 목록이 깜빡인다
-  item.thumbUrl = prev?.thumbUrl ?? null;
+  // 새로 온 썸네일이 있으면 그것을, 없으면 앞서 만들어 둔 것을 쓴다.
+  // 앞의 prev 만 보던 코드는 갓 만들어진 썸네일을 매번 버려 카드가 늘 placeholder 였다
+  item.thumbUrl = item.thumbUrl ?? prev?.thumbUrl ?? null;
   items.set(item.job.id, item);
+  // onChanged 는 썸네일 복원 같은 것으로도 온다. 상태가 실제로 바뀐 순간만 남긴다
+  if (hydrated && prev?.status !== item.status) {
+    if (item.status === "done") pushRecent(labelOf(item.job), "ok", "출력 완료");
+    else if (item.status === "failed") pushRecent(labelOf(item.job), "error", "처리 실패");
+  }
   renderQueue();
 };
 
-api.agent.onReady(upsert);
+api.agent.onReady((item) => {
+  if (hydrated) pushRecent(labelOf(item.job), "ok", "다운로드");
+  upsert(item);
+});
 api.agent.onChanged(upsert);
 api.agent.onRemoved((jobId) => {
   items.delete(jobId);
@@ -550,6 +772,7 @@ $("install").addEventListener("click", () => api.update.install());
   const state = await api.agent.state();
   running = state.running;
   for (const item of state.items) upsert(item);
+  hydrated = true;
   renderAgentState();
   setView("queue");
 })();

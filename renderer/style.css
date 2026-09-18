@@ -13,10 +13,52 @@
   --success: #1e9e54;
   --danger: #d62e2e;
   --warning: #c77700;
+  /* 은은한 배경 틴트 — 칩·카드에 쓴다 */
+  --success-soft: #e4f6ec;
+  --danger-soft: #fce6e6;
+  --warning-soft: #fff3dd;
+  --accent-soft: #e8f0fe;
+  --alt: #6d4aff;
+  --alt-hover: #5a37e0;
+  /* 체크박스·숫자 조절·스크롤바·드롭다운 팝업은 OS 위젯이다. 이 값을 봐야 같이 어두워진다 */
+  color-scheme: light;
+  --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23444a54' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+/*
+  다크 — 같은 토큰을 다시 정의한다.
+  기본은 OS 를 따르고(:root:not([data-theme="light"])), 사용자가 고르면 data-theme 가 이긴다.
+  파이썬 판의 [gui] appearance = system|light|dark 와 같은 3택이다.
+*/
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161a; --surface: #1c1f25; --surface-2: #23272e; --border: #2e333b;
+    --text: #e8eaed; --text-sub: #b3b9c4; --text-muted: #8b919c;
+    --accent: #4a86f0; --accent-hover: #6a9bf5;
+    --neutral: #2b3038; --neutral-hover: #363c46;
+    --success: #3fbd72; --danger: #f06565; --warning: #e0a030;
+    --success-soft: #16301f; --danger-soft: #3a1c1c; --warning-soft: #342810;
+    --accent-soft: #17243a; --alt: #8b6dff; --alt-hover: #7a58f5;
+    color-scheme: dark;
+    --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23b3b9c4' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14161a; --surface: #1c1f25; --surface-2: #23272e; --border: #2e333b;
+  --text: #e8eaed; --text-sub: #b3b9c4; --text-muted: #8b919c;
+  --accent: #4a86f0; --accent-hover: #6a9bf5;
+  --neutral: #2b3038; --neutral-hover: #363c46;
+  --success: #3fbd72; --danger: #f06565; --warning: #e0a030;
+  --success-soft: #16301f; --danger-soft: #3a1c1c; --warning-soft: #342810;
+  --accent-soft: #17243a; --alt: #8b6dff; --alt-hover: #7a58f5;
+  color-scheme: dark;
+  --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23b3b9c4' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0;
+  /* 화면 높이에 못박는다. min-height 면 내용만큼 늘어나 페이지가 통째로 구르고,
+     그러면 현황 줄과 하단 스트립이 화면 밖으로 밀린다 */
+  margin: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
@@ -31,25 +73,76 @@ header {
 }
 h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }
 .head-right { display: flex; align-items: center; gap: 10px; }
+/*
+  헤더 컨트롤은 한 줄에 나란히 선다. 칩(패딩 3px)·작은 버튼(패딩 6px)·아이콘 버튼(34px)이
+  제각각이라 높이가 세 갈래였다. 하나로 못박는다.
+*/
+.head-right .chip,
+.head-right button { height: 32px; }
+.head-right .chip { display: inline-flex; align-items: center; }
+.head-right .icon-only { width: 32px; }
 .version { color: var(--text-muted); font-size: 12px; }
 .chip {
   font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
   background: var(--neutral); color: var(--text-sub);
 }
-.chip.on { background: #e4f6ec; color: var(--success); }
-.chip.off { background: #fce6e6; color: var(--danger); }
+.chip.on { background: var(--success-soft); color: var(--success); }
+.chip.off { background: var(--danger-soft); color: var(--danger); }
 
-main { padding: 20px 24px 40px; display: grid; gap: 16px; max-width: 900px; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
-.card h2 { margin: 0 0 6px; font-size: 15px; }
+main { padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 20px; flex: 1; min-height: 0; }
+/* 설정은 폼이라 너무 넓으면 눈이 가로로 멀리 뛴다. 목록·로그만 화면을 다 쓴다 */
+#auth-card { max-width: 900px; }
+/* 최근 처리(좌) : 로그(우) = 3 : 7.
+   최근 처리는 「16:59 20260916-000002 #1/3 ✅ 출력 완료」로 길이가 거의 고정이지만
+   로그는 배치 계산처럼 긴 줄이 접힌다 */
+/*
+  남는 높이를 이쪽이 다 먹는다. 내용에 맡기면 비었을 때 132px 로 쪼그라들고
+  로그가 쌓이면 부풀어, 위 목록이 덩달아 널뛰었다. 자리는 고정하고 안에서 구른다.
+*/
+.bottom-strip { display: flex; gap: 16px; align-items: stretch; flex: 1; min-height: 160px; }
+.bottom-strip > .card { display: flex; flex-direction: column; }
+.bottom-strip > .card > h2 { flex: none; }
+/* display:flex 가 hidden 속성을 이긴다 — .backdrop 에서 겪은 그 함정 */
+.bottom-strip[hidden] { display: none; }
+.bottom-strip > .card { margin: 0; }
+.recent-card { flex: 3; min-width: 0; }
+.log-card { flex: 7; min-width: 0; }
+/* 로그와 같은 판을 깐다 — 제목·구분선 아래 상자 모양이 둘이 달라 따로 노는 느낌이었다.
+   글꼴은 맞추지 않는다. 로그는 기계가 쓰는 줄이라 고정폭이 맞고,
+   최근 처리는 사람이 훑는 줄이라 본문 글꼴이 읽기 낫다 */
+.recent {
+  margin-top: 12px; flex: 1; min-height: 0; overflow-y: auto;
+  background: var(--surface-2); border-radius: 8px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 7px;
+}
+/* 줄이 늘어도 카드 높이는 그대로 — 안에서 구른다 */
+.recent > * { flex: none; }
+.recent:empty::after {
+  content: "아직 없습니다."; color: var(--text-muted); font-size: 13px;
+}
+.recent-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+/* 시각은 자릿수가 흔들리면 눈이 피곤하다 */
+.recent-row .at { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
+.recent-row .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-row .tail { flex: none; color: var(--text-sub); }
+.recent-row.err, .recent-row.err .tail { color: var(--danger); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px 22px 20px; }
+/* 어디까지가 한 묶음인지 보이도록 제목을 키우고 아래에 선을 둔다 */
+.card h2 { margin: 0 0 14px; font-size: 17px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .card p { margin: 0; color: var(--text-sub); line-height: 1.7; }
 
 .row { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
-input[type="text"], select {
-  border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px;
-  font-size: 14px; font-family: inherit; min-width: 240px; background: var(--surface);
+/* 입력칸과 한 줄에 서는 버튼이라 같은 높이여야 한다 */
+.row button { height: 44px; }
+input[type="text"], input[type="number"], select {
+  border: 1px solid var(--border); border-radius: 8px; padding: 0 14px;
+  font-size: 15px; font-family: inherit; min-width: 240px;
+  /* 색을 안 적으면 브라우저 기본값이라 다크에서 글자가 흐려진다 */
+  background: var(--surface); color: var(--text);
+  /* select 는 기본 글꼴 지표가 달라 input 보다 2px 높다. 높이를 못박아 한 선에 맞춘다 */
+  height: 44px;
 }
-input[type="text"]:focus, select:focus { outline: none; border-color: var(--text); }
+input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: none; border-color: var(--text); }
 
 button {
   border: 0; border-radius: 8px; padding: 9px 18px;
@@ -66,16 +159,21 @@ button:disabled { opacity: 0.5; cursor: default; }
 .status.err { color: var(--danger); }
 .status.warn { color: var(--warning); }
 
-.settings { display: grid; gap: 10px; margin-top: 12px; }
-.check { display: flex; align-items: center; gap: 8px; color: var(--text-sub); }
-.field { display: flex; align-items: center; gap: 10px; color: var(--text-sub); }
-.field > span { min-width: 120px; }
+.settings { display: grid; gap: 14px; margin-top: 12px; }
+.check { display: flex; align-items: center; gap: 9px; font-size: 15px; color: var(--text); }
+.field { display: flex; align-items: center; gap: 12px; font-size: 15px; color: var(--text); }
+.field > span { min-width: 132px; flex: none; }
+/* select 의 min-width:240px 가 그리드 칸을 넘겨 옆 칸을 덮는다. 칸 안에서 줄어들게 둔다.
+   숫자·글자·드롭다운을 가리지 않고 남는 폭을 쓰게 해 오른쪽 끝을 맞춘다 */
+.field:not(.wide) > select,
+.field:not(.wide) > input { min-width: 0; width: auto; flex: 1; }
 
 .queue { display: grid; gap: 8px; margin-top: 14px; }
-.queue:empty::after {
-  content: "대기 중인 건이 없습니다.";
-  color: var(--text-muted); font-size: 13px;
-}
+/* 빈 목록 안내. 예전 .queue 선택자는 실제 요소(class="grid")에 걸리지 않아 죽어 있었다 */
+#queue:empty::after { color: var(--text-muted); font-size: 13px; }
+#queue[data-filter="ready"]:empty::after { content: "출력 대기 중인 디자인이 없습니다."; }
+#queue[data-filter="failed"]:empty::after { content: "실패한 항목이 없습니다."; }
+#queue[data-filter="done"]:empty::after { content: "전송완료 이력이 없습니다."; }
 .item {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
@@ -84,7 +182,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .item .sub { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
 
 .log {
-  margin-top: 12px; max-height: 220px; overflow: auto;
+  margin-top: 12px; flex: 1; min-height: 0; overflow: auto;
   background: var(--surface-2); border-radius: 8px; padding: 10px 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.7;
 }
@@ -107,6 +205,23 @@ button.small { padding: 6px 12px; font-size: 13px; }
 
 /* ── 탭 ── */
 .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+/*
+  출력 목록은 한 줄이 통째로 보이는 높이만 차지하고 더는 늘지 않는다. 줄이 늘면
+  목록 안에서만 구른다. 남는 높이는 하단(최근 처리·로그)이 채운다.
+  한 줄 높이는 칸 폭에 따라 달라지므로(썸네일이 정사각) app.js 가 첫 줄을 재서 넣는다.
+*/
+#queue-view { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* 높이는 app.js 가 넣는다. 창이 낮으면 shrink 로 양보해 하단이 밀리지 않는다 */
+#queue { flex: 0 1 auto; min-height: 0; overflow-y: auto; align-content: start; }
+/* 항목이 없을 때 안내는 영역 한가운데. 칸 수(grid-template-columns)는 건드리지 않는다 —
+   그 값으로 한 줄 높이를 계산하기 때문이다 */
+#queue:empty { align-content: center; }
+#queue:empty::after { grid-column: 1 / -1; justify-self: center; }
+
+/* 파이썬 판처럼 탭이 이 묶음의 머리말 노릇을 한다. 카드 제목과 같은 자리·같은 선 */
+#queue-view > .tabs {
+  flex: none; margin: 0 0 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border);
+}
 .tab {
   background: var(--neutral); color: var(--text-sub);
   padding: 8px 20px; border-radius: 8px; font-weight: 600;
@@ -120,9 +235,9 @@ button.small { padding: 6px 12px; font-size: 13px; }
   background: var(--surface); border: 2px solid var(--border); border-radius: 12px;
   padding: 10px; display: flex; flex-direction: column; gap: 6px; position: relative;
 }
-.job.printing { border-color: var(--accent); background: #e8f0fe; }
-.job.failed { border-color: var(--danger); background: #fce6e6; }
-.job.done { border-color: var(--success); background: #e4f6ec; }
+.job.printing { border-color: var(--accent); background: var(--accent-soft); }
+.job.failed { border-color: var(--danger); background: var(--danger-soft); }
+.job.done { border-color: var(--success); background: var(--success-soft); }
 .job .thumb {
   width: 100%; aspect-ratio: 1; object-fit: contain;
   background: var(--surface-2); border-radius: 8px;
@@ -132,8 +247,8 @@ button.small { padding: 6px 12px; font-size: 13px; }
 .job .meta { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
 .job .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .job .tag { font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--neutral); color: var(--text-sub); }
-.job .tag.warn { background: #fff3dd; color: var(--warning); font-weight: 700; }
-.job .tag.info { background: #e8f0fe; color: var(--accent); }
+.job .tag.warn { background: var(--warning-soft); color: var(--warning); font-weight: 700; }
+.job .tag.info { background: var(--accent-soft); color: var(--accent); }
 .job .ink { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .job .ink button { padding: 11px 0; font-size: 13px; }
 .job .state { font-size: 12px; text-align: center; color: var(--text-muted); }
@@ -144,26 +259,43 @@ button.small { padding: 6px 12px; font-size: 13px; }
   border-radius: 6px; background: rgba(0,0,0,0.06); color: var(--text-sub); font-size: 13px; line-height: 1;
 }
 .job .del:hover { background: var(--danger); color: #fff; }
-.alt { background: #6d4aff; color: #fff; }
-.alt:hover:not(:disabled) { background: #5a37e0; }
-.danger { background: var(--danger); color: #fff; }
+.alt { background: var(--alt); color: #fff; }
+.alt:hover:not(:disabled) { background: var(--alt-hover); }
+/* .stat 의 danger 는 "실패 숫자를 빨갛게" 라는 수식자다. 실패 칸이 버튼이 되면서
+   이 규칙에 걸려 칸 전체가 빨개지고 숫자가 빨간 배경 위 빨간 글씨로 사라졌다 */
+button.danger:not(.stat) { background: var(--danger); color: #fff; }
 
-.settings.two { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-.hint { margin-top: 10px; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
-input[type="number"] { width: 110px; min-width: 0; }
+.settings.two { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); column-gap: 24px; }
+/* 도움말 — .card p 의 margin:0 이 명시도에서 이겨 여백이 먹지 않았다. .card 를 붙여 올린다.
+   ※ 를 글머리로 달고, 접힌 줄은 글머리 아래로 파고들지 않게 내어쓴다 */
+.card .hint {
+  margin-top: 12px; font-size: 13px; color: var(--text-sub); line-height: 1.65;
+  padding-left: 1.4em; text-indent: -1.4em;
+}
+.card .hint::before { content: "※"; margin-right: 0.4em; color: var(--text-muted); }
+/* 도움말이 잇달아 오면 둘이 한 덩어리로 보이지 않게 붙여 둔다 */
+.card .hint + .hint { margin-top: 6px; }
 
 /* ── 모달 ── */
 .backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.4);
   display: flex; align-items: center; justify-content: center; z-index: 100;
 }
+/* hidden 속성은 브라우저 기본 스타일시트로만 동작해 위 display:flex 에 진다.
+   이 줄이 없으면 확인 모달이 창 전체를 덮은 채 사라지지 않는다. */
+.backdrop[hidden] { display: none; }
 .modal { background: var(--surface); border-radius: 14px; padding: 24px; width: 380px; }
 .modal h3 { margin: 0 0 8px; font-size: 16px; }
 .modal p { margin: 0; color: var(--text-sub); line-height: 1.7; font-size: 13px; }
 .row.end { justify-content: flex-end; }
 
 /* 설정 — 등록된 장비 목록 */
-.card h3 { margin: 18px 0 0; font-size: 13px; color: var(--text-muted); }
+/* 소제목 — 위 묶음과 선으로 가른다. 선이 없으면 어디부터가 새 묶음인지 안 보인다 */
+.card h3 {
+  margin: 24px 0 0; padding-top: 16px; border-top: 1px solid var(--border);
+  font-size: 14px; font-weight: 700; color: var(--text);
+}
+.card h3:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .chip-empty { font-size: 13px; color: var(--text-muted); }
 .chip-item {
@@ -181,3 +313,103 @@ input[type="number"] { width: 110px; min-width: 0; }
 .field.wide { flex-direction: column; align-items: stretch; gap: 6px; }
 .field.wide > span { min-width: 0; }
 .field.wide input { min-width: 0; }
+
+/* ── 저장 알림 ── */
+/* 설정에 저장 버튼이 없고 바꾸는 즉시 저장된다. 저장된 줄 알 방법이 없어 잠깐 띄운다.
+   hidden 대신 클래스를 쓴다 — .backdrop 에서 겪은 함정을 되풀이하지 않는다 */
+.saved-toast {
+  position: fixed; right: 22px; bottom: 22px; z-index: 200;
+  /* 배경이 글자색, 글자가 배경색 — 테마가 뒤집혀도 늘 반전으로 도드라진다.
+     #fff 로 두면 다크에서 밝은 배경에 흰 글씨가 되어 사라진다 */
+  background: var(--text); color: var(--bg); font-size: 13px; font-weight: 600;
+  padding: 9px 16px; border-radius: 999px; pointer-events: none;
+  opacity: 0; transform: translateY(6px);
+  transition: opacity .16s ease, transform .16s ease;
+}
+.saved-toast.on { opacity: 1; transform: translateY(0); }
+
+/* ── 드롭다운·숫자 조절 ── */
+/* 기본 화살표는 칸 끝에 바짝 붙고 OS 마다 모양이 다르다. 직접 그려 여백을 준다 */
+select {
+  appearance: none; -webkit-appearance: none;
+  padding-right: 40px; cursor: pointer;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+select:hover { background-color: var(--surface-2); }
+
+/* 숫자 조절 버튼 — 보이고 말고는 기본대로 마우스를 올렸을 때만.
+   다만 기본 크기가 너무 작아 칸 안쪽 높이를 꽉 채우고 가로도 그만큼 넓힌다 */
+input[type="number"] { padding-right: 4px; }
+input[type="number"]::-webkit-inner-spin-button {
+  /* height:100% 는 감싸는 상자에 확정 높이가 없어 0 으로 접힌다. 픽셀로 못박는다 (칸 44px - 테두리 2px) */
+  height: 42px; width: 32px; margin-left: 10px; cursor: pointer;
+}
+
+/* ── 설정 팝업 ── */
+/* 화면을 갈아끼우지 않고 본화면 위에 띄운다. 폼이 길어 머리말은 고정하고 안쪽만 구른다 */
+.settings-modal {
+  background: var(--surface); border-radius: 14px;
+  width: min(960px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.settings-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 22px; border-bottom: 1px solid var(--border);
+}
+.settings-head h2 { margin: 0; font-size: 18px; padding: 0; border: 0; }
+.settings-body { overflow-y: auto; padding: 20px 22px 24px; }
+/* 팝업 안에서는 폭을 팝업이 쥔다. 카드 간격은 main 이 주던 것을 여기서 준다 */
+.settings-modal #settings-view {
+  max-width: none; display: flex; flex-direction: column; gap: 20px;
+}
+
+/* ── 아이콘 ── */
+/* stroke 가 currentColor 라 글자색을 따라간다. 크기는 글자에 맞춰 흐르게 둔다 */
+.icon { width: 1.05em; height: 1.05em; flex: none; vertical-align: -0.16em; }
+.icon-lg { width: 26px; height: 26px; }
+/* 글자 없이 아이콘만 있는 버튼 — 정사각으로 잡아 옆 버튼과 높이를 맞춘다 */
+.icon-only { padding: 0; width: 34px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* 실패 칸은 누르면 에러 폴더가 열린다 — 버튼이지만 옆 칸들과 같아 보여야 한다 */
+button.stat {
+  border: 0; border-radius: 0; font: inherit; text-align: left; cursor: pointer;
+  color: inherit; font-weight: inherit;
+}
+button.stat:hover { background: var(--surface-2); }
+
+/* 아이콘과 글자가 한 줄에 서는 자리들 */
+.job .state, .job .tag, .recent-row .tail {
+  display: inline-flex; align-items: center; gap: 5px;
+}
+/* 전송 중 표시는 돌려서 "지금 움직이는 중" 을 보이게 한다 */
+@keyframes icon-spin { to { transform: rotate(360deg); } }
+.icon.spin { animation: icon-spin 1.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .icon.spin { animation: none; } }
+
+/* ── 2열 설정에서 종류가 섞일 때 ── */
+/*
+  체크박스는 입력칸과 높이도 무게도 달라, 한 줄에 나란히 서면 줄 경계가 무너져 보인다.
+  종류가 바뀌는 자리에서 1열로 못박아 줄을 새로 시작한다 — 입력칸끼리, 체크박스끼리 묶인다.
+*/
+.settings.two > .field + .check,
+.settings.two > .check + .field { grid-column: 1; }
+/* 체크박스 줄도 입력칸 줄과 같은 높이로 세워 세로 리듬을 맞춘다 */
+.settings.two > .check { min-height: 44px; }
+
+/* ── 설정 경고 ── */
+/*
+  출력이 조용히 실패할 상황을 걸기 전에 알린다 — 엉뚱한 프린터가 등록돼 며칠을
+  보낸 매장이 있었다. 현황 줄 바로 아래, 눈이 먼저 닿는 자리에 둔다.
+*/
+.notice {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 24px; background: var(--warning-soft);
+  border-bottom: 1px solid var(--border); color: var(--warning);
+  font-size: 13px; font-weight: 600;
+}
+/* display:flex 가 hidden 을 이긴다 — 같은 함정을 또 밟지 않는다 */
+.notice[hidden] { display: none; }
+.notice-row { display: flex; align-items: center; gap: 8px; }

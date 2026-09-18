@@ -19,6 +19,13 @@ export type AppConfig = {
   /** 인증에 쓴 스토어 식별자 (재인증 시 기본값으로 채운다) */
   tenant: string;
 
+  /**
+   * 화면 밝기. 파이썬 판의 [gui] appearance 와 같은 3택이다.
+   *
+   * `system` 은 OS 설정을 따라간다 — 현장 PC 가 야간에 어두워지면 같이 어두워진다.
+   */
+  appearance: "system" | "light" | "dark";
+
   /** 디자인을 장비로 보내는 역할을 이 단말이 맡는지 */
   garmentEnabled: boolean;
   /** 작업지시서를 인쇄하는 역할을 이 단말이 맡는지 */
@@ -120,6 +127,7 @@ const defaults = (): AppConfig => ({
   baseUrl: "https://store.dpl.shop",
   apiKey: "",
   tenant: "",
+  appearance: "system",
   garmentEnabled: true,
   workOrderEnabled: false,
   garmentPrinterNames: [],
