@@ -16,8 +16,14 @@ import type { GarmentJob } from "./types";
  * 기준 치수는 A4 를 96 DPI 로 본 794 x 1123 px 다.
  */
 
-const A4_WIDTH = 794;
-const A4_HEIGHT = 1123;
+/**
+ * 용지 가장자리에서 띄울 안전 여백.
+ *
+ * 예전에는 본문을 A4 전체(794x1123px = 210x297mm)에 못박고 안쪽 padding 30px(약 7.9mm)
+ * 으로만 버텼다. 프린터에는 물리적으로 찍을 수 없는 가장자리 영역이 있고 그것이 7.9mm 를
+ * 넘는 기종에서 위아래가 잘렸다. 용지가 아니라 인쇄 가능 영역을 기준으로 잡는다.
+ */
+const SAFE_MARGIN_MM = 10;
 
 export type WorkOrderInput = {
   job: GarmentJob;
@@ -131,16 +137,16 @@ export function buildWorkOrderHtml(input: WorkOrderInput): string {
 <title>작업지시서_${escapeHtml(job.orderNumber)}_${escapeHtml(job.wepnpSeqno)}</title>
 <style>
   /*
-    인쇄 여백은 0 으로 두고 안쪽 padding 으로 잡는다. 드라이버 기본 여백이 끼면
-    A4 한 장에 담기지 않고 두 장으로 밀린다.
+    @page 여백으로 용지 가장자리를 띄우고, 본문은 그 안쪽을 100% 로 채운다.
+    px 로 못박으면 반올림 오차 1px 에도 두 장으로 밀리므로 백분율로 둔다.
   */
-  @page { size: A4; margin: 0; }
+  @page { size: A4; margin: ${SAFE_MARGIN_MM}mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   html, body { margin: 0; padding: 0; }
   body {
-    width: ${A4_WIDTH}px;
-    height: ${A4_HEIGHT}px;
-    padding: 30px 40px;
+    width: 100%;
+    height: 100%;
+    padding: 24px 16px;
     background: #fff;
     color: #000;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", Roboto, sans-serif;
@@ -148,11 +154,11 @@ export function buildWorkOrderHtml(input: WorkOrderInput): string {
   }
 
   /* 워터마크는 위아래만. 좌우 세로 워터마크는 본문 폭을 갉아먹어 표와 이미지가 눌렸다 */
-  .wm { position: absolute; left: 40px; right: 40px; display: flex; justify-content: space-between;
+  .wm { position: absolute; left: 16px; right: 16px; display: flex; justify-content: space-between;
         font-size: 10px; color: #dc2626; font-weight: 500; }
   .wm .strong { font-weight: 700; }
-  .wm-top { top: 10px; }
-  .wm-bottom { bottom: 10px; }
+  .wm-top { top: 6px; }
+  .wm-bottom { bottom: 6px; }
 
   .sheet { display: flex; flex-direction: column; height: 100%; }
 
