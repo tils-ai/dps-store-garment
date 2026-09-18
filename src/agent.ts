@@ -129,7 +129,7 @@ export class Agent {
             item.thumbUrl = url;
             this.events.onItemChanged?.(item);
           })
-          .catch(() => undefined);
+          .catch((error) => this.log("warn", `썸네일 복원 실패: ${item.job.orderNumber} — ${(error as Error).message}`));
       }
       if (this.ready.size > 0) this.log("info", `대기 목록 ${this.ready.size}건을 되살렸습니다.`);
     } catch {
@@ -273,8 +273,12 @@ export class Agent {
         status: "ready",
         errorReason: "",
       };
-      // 카드 미리보기 — 원본은 300DPI 라 작은 판으로 줄여 담는다
-      item.thumbUrl = await makeThumbnail(downloadPath).catch(() => null);
+      // 카드 미리보기 — 원본은 300DPI 라 작은 판으로 줄여 담는다.
+      // 조용히 삼키면 카드만 비고 로그에 아무 흔적이 없어 알아채기 어렵다
+      item.thumbUrl = await makeThumbnail(downloadPath).catch((error) => {
+        this.log("warn", `썸네일 생성 실패: ${label} — ${(error as Error).message}`);
+        return null;
+      });
 
       this.ready.set(job.id, item);
       this.persist();
