@@ -13,6 +13,8 @@ files:
     filter: ["**/*"]
 win:
   target: nsis
+  # 디플샵 브랜드 마크. dps-store 의 PWA 아이콘(public/icons/icon-512.png)에서 뽑았다
+  icon: build/icon.ico
 # 벤더 실행 파일을 asar 밖으로 풀어야 child_process 로 부를 수 있다.
 # 이름은 그대로라 설치 폴더에서 곧바로 눈에 띄지는 않는다.
 asarUnpack:

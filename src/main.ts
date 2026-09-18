@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import path from "node:path";
 import { setupIpc, teardownIpc } from "./ipc";
 import { closeLog, writeLog } from "./logger";
@@ -20,7 +20,9 @@ const createWindow = (): void => {
     minWidth: 900,
     minHeight: 600,
     show: false,
-    title: "가먼트 프린터",
+    title: "DPS Garment Printer Manager",
+    // 설치본은 exe 에 박힌 아이콘을 쓴다. 개발 실행에서만 따로 물려 준다
+    ...(app.isPackaged ? {} : { icon: path.join(__dirname, "..", "build", "icon.png") }),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -28,8 +30,14 @@ const createWindow = (): void => {
     },
   });
 
-  // 흰 화면이 깜빡이지 않도록 그려진 뒤에 띄운다
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  // 흰 화면이 깜빡이지 않도록 그려진 뒤에 띄운다.
+  // 현장 PC 는 이 창만 띄워 두고 쓰므로 처음부터 화면을 다 쓴다.
+  // width/height 는 사용자가 최대화를 풀었을 때 돌아갈 크기로 남는다
+  mainWindow.once("ready-to-show", () => {
+    // 띄우기 전에 최대화한다 — 순서를 바꾸면 기본 크기로 한 번 깜빡인 뒤 커진다
+    mainWindow?.maximize();
+    mainWindow?.show();
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -55,6 +63,11 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    // 기본 메뉴(File/Edit/View/Window/Help)는 이 앱에 쓸 항목이 없다. 현장 PC 에서
+    // 작업자가 잘못 건드릴 자리만 된다. 창 제목줄만 남긴다.
+    // 곁들여 F12(개발자 도구) 단축키도 함께 사라진다 — 진단은 로그와 진단 보고서로 한다
+    Menu.setApplicationMenu(null);
+
     ipcMain.handle("app:version", () => app.getVersion());
 
     createWindow();
